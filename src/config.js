@@ -218,6 +218,14 @@ export function loadConfig(rootDir = process.cwd()) {
       0.95,
       Math.max(0.5, asNumber(process.env.CONTEXT_COMPACT_THRESHOLD, 0.8))
     ),
+    contextMemoryLoadFraction: Math.min(
+      0.2,
+      Math.max(0.02, asNumber(process.env.CONTEXT_MEMORY_LOAD_FRACTION, 0.1))
+    ),
+    contextWindowFallbackTokens: Math.max(
+      8192,
+      asNumber(process.env.CONTEXT_WINDOW_FALLBACK_TOKENS, 128000)
+    ),
     feishuBaseUrl: process.env.FEISHU_BASE_URL || "https://open.feishu.cn",
     feishuRequestTimeoutMs: Math.max(
       1000,

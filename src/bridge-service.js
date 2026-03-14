@@ -123,6 +123,14 @@ function memoryFileNameForChat(chatKey) {
   return `${Buffer.from(chatKey).toString("base64url")}.md`;
 }
 
+function estimateTokenCount(text) {
+  const normalized = String(text || "").replace(/\s+/g, "");
+  return Math.max(
+    Math.ceil(normalized.length / 4),
+    normalized.length
+  );
+}
+
 function buildReplyTarget(config, event) {
   return {
     chatId: event.message.chat_id,
@@ -208,6 +216,7 @@ function sanitizeTaskSnapshot(task) {
     lastProgressText: task.lastProgressText || "",
     prompt: task.prompt,
     recovered: Boolean(task.recovered),
+    modelContextWindow: task.modelContextWindow || 0,
     senderOpenId: task.senderOpenId || "",
     sessionId: task.sessionId || "",
     startedAt: task.startedAt || "",
@@ -286,6 +295,51 @@ export class BridgeService {
     }
   }
 
+  getMemoryTokenBudget(contextWindow) {
+    const resolvedWindow =
+      Number(contextWindow) > 0
+        ? Number(contextWindow)
+        : this.config.contextWindowFallbackTokens;
+    return Math.max(
+      64,
+      Math.floor(resolvedWindow * this.config.contextMemoryLoadFraction)
+    );
+  }
+
+  trimMemoryToBudget(memoryText, contextWindow) {
+    const budgetTokens = this.getMemoryTokenBudget(contextWindow);
+    const normalized = String(memoryText || "").trim();
+    if (!normalized) {
+      return {
+        text: "",
+        truncated: false
+      };
+    }
+
+    if (estimateTokenCount(normalized) <= budgetTokens) {
+      return {
+        text: normalized,
+        truncated: false
+      };
+    }
+
+    let sliceLength = Math.max(
+      64,
+      Math.floor(normalized.length * (budgetTokens / estimateTokenCount(normalized)))
+    );
+    let candidate = normalized.slice(0, sliceLength).trim();
+
+    while (candidate && estimateTokenCount(candidate) > budgetTokens) {
+      sliceLength = Math.max(0, sliceLength - Math.ceil(sliceLength * 0.1));
+      candidate = normalized.slice(0, sliceLength).trim();
+    }
+
+    return {
+      text: `${candidate}\n\n[记忆内容已按上下文预算截断]`.trim(),
+      truncated: true
+    };
+  }
+
   buildPromptWithMemory(prompt, conversation, workspaceDir) {
     if (conversation?.sessionId) {
       return prompt;
@@ -298,10 +352,14 @@ export class BridgeService {
     if (!memoryText) {
       return prompt;
     }
+    const trimmedMemory = this.trimMemoryToBudget(
+      memoryText,
+      conversation?.lastModelContextWindow
+    );
 
     return [
-      "以下是从之前会话压缩得到的记忆，请先阅读并继承这些上下文：",
-      memoryText,
+      `以下是从之前会话压缩得到的记忆，请先阅读并继承这些上下文。已限制为上下文窗口的 ${formatPercent(this.config.contextMemoryLoadFraction)} 以内：`,
+      trimmedMemory.text,
       "",
       "请基于这些记忆继续处理下面的新请求。",
       "",
@@ -328,7 +386,8 @@ export class BridgeService {
       "1. 概括用户目标、已完成事项、仍待处理事项。",
       "2. 列出关键文件、配置、约束、已知风险。",
       "3. 如果有未完成任务，给出下一步建议。",
-      "4. 只输出记忆正文，不要寒暄，不要解释。"
+      `4. 控制长度在约 ${this.getMemoryTokenBudget(task.modelContextWindow)} tokens 以内。`,
+      "5. 只输出记忆正文，不要寒暄，不要解释。"
     ].join("\n");
     const summaryRunner = this.runCodexTask(this.config, {
       prompt: summaryPrompt,
@@ -336,7 +395,10 @@ export class BridgeService {
       workspaceDir: task.workspaceDir
     });
     const summaryResult = await summaryRunner.result;
-    const memoryText = summaryResult.finalMessage.trim();
+    const memoryText = this.trimMemoryToBudget(
+      summaryResult.finalMessage,
+      task.modelContextWindow
+    ).text;
     const memoryFilePath = this.getMemoryFilePath(task.chatKey);
 
     fs.mkdirSync(path.dirname(memoryFilePath), { recursive: true });
@@ -344,6 +406,7 @@ export class BridgeService {
 
     this.store.upsertConversation(task.chatKey, {
       lastCompactedAt: new Date().toISOString(),
+      lastModelContextWindow: task.modelContextWindow || 0,
       lastContextUsageRatio: task.contextUsageRatio,
       memoryFilePath,
       sessionId: ""
@@ -574,6 +637,7 @@ export class BridgeService {
       lastErrorMessage: "",
       lastProgressText: "",
       lastStreamSentAt: 0,
+      modelContextWindow: 0,
       prompt,
       recovered: false,
       senderOpenId,
@@ -929,6 +993,10 @@ export class BridgeService {
     const tokenUsage = extractTokenUsage(event);
     if (tokenUsage) {
       task.contextUsageRatio = Math.max(task.contextUsageRatio, tokenUsage.ratio);
+      task.modelContextWindow = Math.max(
+        task.modelContextWindow || 0,
+        tokenUsage.modelContextWindow
+      );
       this.persistRuntime();
     }
 
@@ -1052,6 +1120,7 @@ export class BridgeService {
       task.lastErrorMessage = "";
       this.store.upsertConversation(task.chatKey, {
         lastContextUsageRatio: task.contextUsageRatio,
+        lastModelContextWindow: task.modelContextWindow || 0,
         memoryFilePath: conversation?.memoryFilePath || "",
         lastSenderOpenId: task.senderOpenId,
         lastTaskId: task.id,

@@ -71,6 +71,8 @@ FEISHU_REQUEST_RETRIES=2
 FEISHU_REQUEST_RETRY_DELAY_MS=300
 CONTEXT_COMPACT_ENABLED=true
 CONTEXT_COMPACT_THRESHOLD=0.8
+CONTEXT_MEMORY_LOAD_FRACTION=0.1
+CONTEXT_WINDOW_FALLBACK_TOKENS=128000
 
 CODEX_WORKSPACE_DIR=/home/jingqi/workspace/your-project
 CHAT_WORKSPACE_MAPPINGS="group:oc_xxx=/home/jingqi/workspace/project-a;group:oc_yyy=/home/jingqi/workspace/project-b"
@@ -123,7 +125,7 @@ curl http://127.0.0.1:3000/healthz
 
 `FEISHU_REQUEST_TIMEOUT_MS`、`FEISHU_REQUEST_RETRIES` 和 `FEISHU_REQUEST_RETRY_DELAY_MS` 用于控制飞书 HTTP 请求的超时和重试。`MAX_QUEUED_TASKS_PER_CHAT`、`MAX_QUEUED_TASKS_PER_USER` 用于限制待处理任务数量，防止单个聊天或用户积压过多任务。
 
-开启 `CONTEXT_COMPACT_ENABLED=true` 后，桥接器会在检测到 Codex 上下文占用达到 `CONTEXT_COMPACT_THRESHOLD` 后，自动用当前会话生成记忆摘要，落盘到 `.codex-feishu-bridge/memory/`，并在下一次新会话开始时自动把记忆注入提示词。
+开启 `CONTEXT_COMPACT_ENABLED=true` 后，桥接器会在检测到 Codex 上下文占用达到 `CONTEXT_COMPACT_THRESHOLD` 后，自动用当前会话生成记忆摘要，落盘到 `.codex-feishu-bridge/memory/`，并在下一次新会话开始时自动把记忆注入提示词。注入时会按 `CONTEXT_MEMORY_LOAD_FRACTION` 限制记忆最多只占上下文窗口的一部分，默认不超过 10%，避免记忆文件持续膨胀反向挤占上下文。
 
 运行测试：
 

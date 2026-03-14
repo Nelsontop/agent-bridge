@@ -17,7 +17,9 @@ function createConfig(overrides = {}) {
     codexWorkspaceDir: "/tmp/codex-workspace",
     contextCompactEnabled: false,
     contextCompactThreshold: 0.8,
+    contextMemoryLoadFraction: 0.1,
     contextMemoryDir: path.join(os.tmpdir(), "codex-bridge-memory-default"),
+    contextWindowFallbackTokens: 128000,
     feishuAllowedOpenIds: new Set(),
     feishuBotOpenId: "",
     feishuInteractiveCardsEnabled: true,
@@ -511,4 +513,52 @@ test("context compaction writes memory to disk and uses it in the next fresh ses
 
   assert.equal(calls[2].sessionId, null);
   assert.equal(calls[2].prompt.includes("压缩后的记忆内容"), true);
+});
+
+test("loaded memory is trimmed to at most ten percent of the context budget", async () => {
+  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-limit-"));
+  const memoryFilePath = path.join(memoryDir, "memory.md");
+  const largeMemory = "记忆".repeat(300);
+  fs.writeFileSync(memoryFilePath, largeMemory, "utf8");
+
+  const calls = [];
+  const bridge = new BridgeService(
+    createConfig({
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.8,
+      contextMemoryDir: memoryDir,
+      contextMemoryLoadFraction: 0.1
+    }),
+    createStore({
+      conversations: {
+        "p2p:oc_test_chat": {
+          lastModelContextWindow: 1000,
+          memoryFilePath,
+          sessionId: "",
+          workspaceDir: "/tmp/codex-workspace"
+        }
+      }
+    }),
+    createClient(),
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: (_config, args) => {
+        calls.push(args);
+        return {
+          cancel() {},
+          result: Promise.resolve({
+            finalMessage: "done",
+            sessionId: "thread_memory"
+          })
+        };
+      }
+    }
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(payload);
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  assert.equal(calls[0].prompt.includes("[记忆内容已按上下文预算截断]"), true);
+  assert.equal(calls[0].prompt.includes(largeMemory), false);
 });
