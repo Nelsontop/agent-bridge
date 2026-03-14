@@ -40,6 +40,10 @@
 - 支持飞书私聊文本消息
 - 支持群聊中 `@机器人` 后发送文本
 - 支持聊天级别的会话恢复
+- 支持 reply-to-message，减少群聊串线
+- 支持带 `Abort` / `Reset Session` 按钮的消息卡片
+- 支持按会话映射不同工作目录
+- 支持任务结束后自动 Git 提交，再继续下一个任务
 - 支持串行任务队列
 - 支持 `/help`、`/status`、`/reset`、`/abort <任务号>`
 - 支持本地状态持久化到 `.codex-feishu-bridge/state.json`
@@ -66,8 +70,11 @@ ENABLE_HEALTH_SERVER=true
 
 # 逗号分隔；不填则允许所有能给机器人发消息的人
 FEISHU_ALLOWED_OPEN_IDS=
+FEISHU_REPLY_TO_MESSAGE_ENABLED=true
+FEISHU_INTERACTIVE_CARDS_ENABLED=true
 
 CODEX_WORKSPACE_DIR=/home/jingqi/workspace/your-project
+CHAT_WORKSPACE_MAPPINGS="group:oc_xxx=/home/jingqi/workspace/project-a;group:oc_yyy=/home/jingqi/workspace/project-b"
 CODEX_COMMAND="~/.local/bin/codex-proxy --dangerously-bypass-approvals-and-sandbox"
 CODEX_BIN=codex
 CODEX_MODEL=
@@ -80,15 +87,18 @@ MAX_REPLY_CHARS=1800
 FEISHU_STREAM_OUTPUT_ENABLED=true
 FEISHU_STREAM_COMMAND_STATUS_ENABLED=true
 FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS=1200
+AUTO_COMMIT_AFTER_TASK_ENABLED=true
+AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 ```
 
 ## 飞书侧配置
 
 1. 创建一个企业自建应用，并开启机器人能力
 2. 在事件与回调中添加事件：`im.message.receive_v1`
-3. 在“订阅方式”中选择“使用长连接接收事件/回调”
-4. 不需要配置公网请求地址
-5. 把应用安装到企业，并确保机器人可以被私聊/被群聊 @
+3. 如果启用卡片按钮，再额外订阅卡片按钮回调事件
+4. 在“订阅方式”中选择“使用长连接接收事件/回调”
+5. 不需要配置公网请求地址
+6. 把应用安装到企业，并确保机器人可以被私聊/被群聊 @
 
 ## 运行
 
@@ -106,6 +116,10 @@ curl http://127.0.0.1:3000/healthz
 
 开启 `FEISHU_STREAM_OUTPUT_ENABLED=true` 后，桥接器会在任务执行过程中把中间 `agent_message` 和命令状态分段发回飞书。可用 `FEISHU_STREAM_COMMAND_STATUS_ENABLED` 控制是否发送命令开始/结束提示，用 `FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS` 控制最小推送间隔，避免刷屏。
 
+开启 `FEISHU_REPLY_TO_MESSAGE_ENABLED=true` 后，桥接器会回复到原消息。开启 `FEISHU_INTERACTIVE_CARDS_ENABLED=true` 后，任务接收和 `/status` 会返回带 `Abort` / `Reset Session` 按钮的交互卡片。
+
+`CHAT_WORKSPACE_MAPPINGS` 支持用 `chatKey=/abs/path` 或 `chat_id=/abs/path` 按会话映射工作目录，条目之间用分号分隔。开启 `AUTO_COMMIT_AFTER_TASK_ENABLED=true` 后，桥接器会在每个任务结束后先执行自动提交，再继续下一个任务；因此会强制串行执行任务。
+
 ## 测试记录
 
 - 已用真实飞书凭据成功调用 `auth/v3/tenant_access_token/internal`
@@ -115,6 +129,6 @@ curl http://127.0.0.1:3000/healthz
 
 ## 建议的后续版本
 
-- 增加消息卡片，把 `/abort`、`/reset` 做成按钮
-- 增加 reply-to-message 能力，减少群聊串线
-- 为不同群聊映射不同工作目录
+- 增加共享卡片更新，把任务状态收敛到同一张卡片
+- 增加更细粒度的工作目录路由规则，例如按用户或按消息前缀切换
+- 增加自动 push / PR 工作流，但应和自动 commit 解耦
