@@ -38,6 +38,7 @@
 - 支持同一聊天内任务串行、不同聊天按配置并行
 - 支持 `/help`、`/status`、`/reset`、`/abort <任务号>`，其中 `/abort` 可终止运行中任务或取消排队任务
 - 支持本地状态持久化到 `.codex-feishu-bridge/state.json`，包含会话、任务编号、排队快照和重启中断任务
+- 支持上下文占用接近上限时自动压缩会话记忆，落盘后在新会话中自动继续
 - 支持按聊天和用户维度限制待处理任务数量
 - 健康检查会输出飞书 HTTP/WS 请求指标、重试和最近错误信息
 
@@ -68,6 +69,8 @@ FEISHU_INTERACTIVE_CARDS_ENABLED=true
 FEISHU_REQUEST_TIMEOUT_MS=10000
 FEISHU_REQUEST_RETRIES=2
 FEISHU_REQUEST_RETRY_DELAY_MS=300
+CONTEXT_COMPACT_ENABLED=true
+CONTEXT_COMPACT_THRESHOLD=0.8
 
 CODEX_WORKSPACE_DIR=/home/jingqi/workspace/your-project
 CHAT_WORKSPACE_MAPPINGS="group:oc_xxx=/home/jingqi/workspace/project-a;group:oc_yyy=/home/jingqi/workspace/project-b"
@@ -119,6 +122,8 @@ curl http://127.0.0.1:3000/healthz
 `CHAT_WORKSPACE_MAPPINGS` 支持用 `chatKey=/abs/path` 或 `chat_id=/abs/path` 按会话映射工作目录，条目之间用分号分隔。开启 `AUTO_COMMIT_AFTER_TASK_ENABLED=true` 后，桥接器会在每个任务结束后先执行自动提交，再继续下一个任务；因此会强制串行执行任务。
 
 `FEISHU_REQUEST_TIMEOUT_MS`、`FEISHU_REQUEST_RETRIES` 和 `FEISHU_REQUEST_RETRY_DELAY_MS` 用于控制飞书 HTTP 请求的超时和重试。`MAX_QUEUED_TASKS_PER_CHAT`、`MAX_QUEUED_TASKS_PER_USER` 用于限制待处理任务数量，防止单个聊天或用户积压过多任务。
+
+开启 `CONTEXT_COMPACT_ENABLED=true` 后，桥接器会在检测到 Codex 上下文占用达到 `CONTEXT_COMPACT_THRESHOLD` 后，自动用当前会话生成记忆摘要，落盘到 `.codex-feishu-bridge/memory/`，并在下一次新会话开始时自动把记忆注入提示词。
 
 运行测试：
 

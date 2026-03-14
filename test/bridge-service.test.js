@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -14,6 +15,9 @@ function createConfig(overrides = {}) {
   return {
     chatWorkspaceMappings: new Map(),
     codexWorkspaceDir: "/tmp/codex-workspace",
+    contextCompactEnabled: false,
+    contextCompactThreshold: 0.8,
+    contextMemoryDir: path.join(os.tmpdir(), "codex-bridge-memory-default"),
     feishuAllowedOpenIds: new Set(),
     feishuBotOpenId: "",
     feishuInteractiveCardsEnabled: true,
@@ -421,4 +425,90 @@ test("dispatchEvent rejects tasks when the chat queue limit is reached", async (
     sessionId: "thread_done"
   });
   await waitFor(() => bridge.running.size === 0);
+});
+
+test("context compaction writes memory to disk and uses it in the next fresh session", async () => {
+  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-"));
+  const client = createClient();
+  const calls = [];
+  const runCodexTask = (_config, args) => {
+    calls.push(args);
+
+    if (calls.length === 1) {
+      args.onEvent?.({
+        payload: {
+          info: {
+            model_context_window: 1000,
+            total_token_usage: {
+              total_tokens: 850
+            }
+          },
+          type: "token_count"
+        },
+        type: "event_msg"
+      });
+
+      return {
+        cancel() {},
+        result: Promise.resolve({
+          finalMessage: "first result",
+          sessionId: "thread_compact"
+        })
+      };
+    }
+
+    if (calls.length === 2) {
+      return {
+        cancel() {},
+        result: Promise.resolve({
+          finalMessage: "压缩后的记忆内容",
+          sessionId: "thread_compact"
+        })
+      };
+    }
+
+    return {
+      cancel() {},
+      result: Promise.resolve({
+        finalMessage: "second result",
+        sessionId: "thread_new"
+      })
+    };
+  };
+
+  const store = createStore();
+  const bridge = new BridgeService(
+    createConfig({
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.8,
+      contextMemoryDir: memoryDir
+    }),
+    store,
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask
+    }
+  );
+
+  const firstPayload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(firstPayload);
+  await waitFor(() => bridge.running.size === 0 && calls.length >= 2);
+
+  const conversationAfterCompaction = store.getConversation("p2p:oc_test_chat");
+  assert.equal(conversationAfterCompaction.sessionId, "");
+  assert.equal(fs.existsSync(conversationAfterCompaction.memoryFilePath), true);
+  assert.equal(
+    fs.readFileSync(conversationAfterCompaction.memoryFilePath, "utf8").trim(),
+    "压缩后的记忆内容"
+  );
+
+  const secondPayload = loadFixture("message.receive_v1.json");
+  secondPayload.event.message.message_id = "om_source_message_6";
+  secondPayload.event.message.content = "{\"text\":\"基于之前记忆继续\"}";
+  await bridge.dispatchEvent(secondPayload);
+  await waitFor(() => bridge.running.size === 0 && calls.length >= 3);
+
+  assert.equal(calls[2].sessionId, null);
+  assert.equal(calls[2].prompt.includes("压缩后的记忆内容"), true);
 });

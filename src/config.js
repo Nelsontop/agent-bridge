@@ -209,6 +209,15 @@ export function loadConfig(rootDir = process.cwd()) {
     enableHealthServer: asBoolean(process.env.ENABLE_HEALTH_SERVER, true),
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
+    contextMemoryDir: path.join(stateDir, "memory"),
+    contextCompactEnabled: asBoolean(
+      process.env.CONTEXT_COMPACT_ENABLED,
+      true
+    ),
+    contextCompactThreshold: Math.min(
+      0.95,
+      Math.max(0.5, asNumber(process.env.CONTEXT_COMPACT_THRESHOLD, 0.8))
+    ),
     feishuBaseUrl: process.env.FEISHU_BASE_URL || "https://open.feishu.cn",
     feishuRequestTimeoutMs: Math.max(
       1000,

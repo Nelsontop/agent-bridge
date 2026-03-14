@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
 import { autoCommitWorkspace as defaultAutoCommitWorkspace } from "./git-commit.js";
 
@@ -89,6 +91,38 @@ function truncateText(text, maxChars) {
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
+function formatPercent(value) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function extractTokenUsage(event) {
+  const payload =
+    event?.type === "event_msg"
+      ? event.payload
+      : event?.type === "token_count"
+        ? event
+        : null;
+  if (payload?.type !== "token_count") {
+    return null;
+  }
+
+  const totalTokens = Number(payload.info?.total_token_usage?.total_tokens);
+  const modelContextWindow = Number(payload.info?.model_context_window);
+  if (!Number.isFinite(totalTokens) || !Number.isFinite(modelContextWindow) || modelContextWindow <= 0) {
+    return null;
+  }
+
+  return {
+    modelContextWindow,
+    ratio: totalTokens / modelContextWindow,
+    totalTokens
+  };
+}
+
+function memoryFileNameForChat(chatKey) {
+  return `${Buffer.from(chatKey).toString("base64url")}.md`;
+}
+
 function buildReplyTarget(config, event) {
   return {
     chatId: event.message.chat_id,
@@ -166,6 +200,7 @@ function sanitizeTaskSnapshot(task) {
     autoCommitSummary: task.autoCommitSummary || "",
     cardMessageId: task.cardMessageId || "",
     chatKey: task.chatKey,
+    contextUsageRatio: task.contextUsageRatio || 0,
     enqueuedAt: task.enqueuedAt,
     finalMessage: task.finalMessage || "",
     id: task.id,
@@ -206,6 +241,7 @@ export class BridgeService {
     this.autoCommitWorkspace =
       dependencies.autoCommitWorkspace || defaultAutoCommitWorkspace;
     this.metrics = {
+      contextCompactionCount: 0,
       queuedCancelCount: 0,
       recoveredInterruptedCount: 0,
       recoveredQueuedCount: 0,
@@ -230,6 +266,95 @@ export class BridgeService {
       this.config.chatWorkspaceMappings.get(chatId) ||
       this.config.codexWorkspaceDir
     );
+  }
+
+  getMemoryFilePath(chatKey) {
+    return path.join(this.config.contextMemoryDir, memoryFileNameForChat(chatKey));
+  }
+
+  readConversationMemory(conversation) {
+    const memoryFilePath = conversation?.memoryFilePath;
+    if (!memoryFilePath || !fs.existsSync(memoryFilePath)) {
+      return "";
+    }
+
+    try {
+      return fs.readFileSync(memoryFilePath, "utf8").trim();
+    } catch (error) {
+      console.warn("[memory] failed to read memory file:", error.message);
+      return "";
+    }
+  }
+
+  buildPromptWithMemory(prompt, conversation, workspaceDir) {
+    if (conversation?.sessionId) {
+      return prompt;
+    }
+    if (conversation?.workspaceDir && conversation.workspaceDir !== workspaceDir) {
+      return prompt;
+    }
+
+    const memoryText = this.readConversationMemory(conversation);
+    if (!memoryText) {
+      return prompt;
+    }
+
+    return [
+      "以下是从之前会话压缩得到的记忆，请先阅读并继承这些上下文：",
+      memoryText,
+      "",
+      "请基于这些记忆继续处理下面的新请求。",
+      "",
+      prompt
+    ].join("\n");
+  }
+
+  async compactConversationContext(task, sessionId) {
+    if (!this.config.contextCompactEnabled || !sessionId) {
+      return {
+        performed: false
+      };
+    }
+    if (task.contextUsageRatio < this.config.contextCompactThreshold) {
+      return {
+        performed: false
+      };
+    }
+
+    const summaryPrompt = [
+      "当前会话上下文占用已经接近上限。",
+      "请把到目前为止的上下文压缩成一份供后续新会话继续工作的记忆。",
+      "要求：",
+      "1. 概括用户目标、已完成事项、仍待处理事项。",
+      "2. 列出关键文件、配置、约束、已知风险。",
+      "3. 如果有未完成任务，给出下一步建议。",
+      "4. 只输出记忆正文，不要寒暄，不要解释。"
+    ].join("\n");
+    const summaryRunner = this.runCodexTask(this.config, {
+      prompt: summaryPrompt,
+      sessionId,
+      workspaceDir: task.workspaceDir
+    });
+    const summaryResult = await summaryRunner.result;
+    const memoryText = summaryResult.finalMessage.trim();
+    const memoryFilePath = this.getMemoryFilePath(task.chatKey);
+
+    fs.mkdirSync(path.dirname(memoryFilePath), { recursive: true });
+    fs.writeFileSync(memoryFilePath, `${memoryText}\n`, "utf8");
+
+    this.store.upsertConversation(task.chatKey, {
+      lastCompactedAt: new Date().toISOString(),
+      lastContextUsageRatio: task.contextUsageRatio,
+      memoryFilePath,
+      sessionId: ""
+    });
+
+    task.lastProgressText = `上下文已压缩归档到 ${memoryFilePath}，后续任务会从记忆继续。`;
+    this.metrics.contextCompactionCount += 1;
+    return {
+      memoryFilePath,
+      performed: true
+    };
   }
 
   persistRuntime() {
@@ -442,6 +567,7 @@ export class BridgeService {
       cardMessageId: "",
       chatKey,
       completedCommandIds: new Set(),
+      contextUsageRatio: 0,
       enqueuedAt: new Date().toISOString(),
       finalMessage: "",
       id: formatTaskId(this.nextTaskNumber++),
@@ -502,6 +628,9 @@ export class BridgeService {
     }
     if (task.sessionId) {
       bodyLines.push(`**Session**：\`${task.sessionId}\``);
+    }
+    if (task.contextUsageRatio > 0) {
+      bodyLines.push(`**上下文占用**：${formatPercent(task.contextUsageRatio)}`);
     }
     if (task.recovered) {
       bodyLines.push("**恢复状态**：服务重启后已恢复该任务快照");
@@ -658,6 +787,7 @@ export class BridgeService {
         `chatKey: ${chatKey}`,
         `workspace: ${workspaceDir}`,
         `sessionId: ${conversation?.sessionId || "无"}`,
+        `memoryFile: ${conversation?.memoryFilePath || "无"}`,
         `running: ${runningTask ? `${runningTask.id} (${runningTask.startedAt})` : "无"}`,
         `queued: ${queuedTasks.map((task) => task.id).join(", ") || "无"}`,
         `interrupted: ${interruptedCount}`
@@ -796,6 +926,12 @@ export class BridgeService {
   }
 
   handleRunnerEvent(task, event) {
+    const tokenUsage = extractTokenUsage(event);
+    if (tokenUsage) {
+      task.contextUsageRatio = Math.max(task.contextUsageRatio, tokenUsage.ratio);
+      this.persistRuntime();
+    }
+
     if (!this.config.feishuStreamOutputEnabled || !event?.item) {
       return;
     }
@@ -896,7 +1032,7 @@ export class BridgeService {
       onEvent: (event) => {
         this.handleRunnerEvent(task, event);
       },
-      prompt: task.prompt,
+      prompt: this.buildPromptWithMemory(task.prompt, conversation, task.workspaceDir),
       sessionId,
       workspaceDir: task.workspaceDir
     });
@@ -915,6 +1051,8 @@ export class BridgeService {
       task.finalMessage = result.finalMessage;
       task.lastErrorMessage = "";
       this.store.upsertConversation(task.chatKey, {
+        lastContextUsageRatio: task.contextUsageRatio,
+        memoryFilePath: conversation?.memoryFilePath || "",
         lastSenderOpenId: task.senderOpenId,
         lastTaskId: task.id,
         sessionId: result.sessionId,
@@ -923,6 +1061,19 @@ export class BridgeService {
 
       const autoCommitResult = await this.autoCommitWorkspace(this.config, task);
       task.autoCommitSummary = this.formatAutoCommitResult(autoCommitResult);
+      let compacted = false;
+      if (result.sessionId) {
+        try {
+          const compactResult = await this.compactConversationContext(task, result.sessionId);
+          compacted = compactResult.performed;
+        } catch (error) {
+          console.error(`[task:${task.id}] context compaction failed:`, error);
+          task.lastProgressText = `上下文压缩失败，将继续沿用当前会话：${error.message || String(error)}`;
+        }
+      }
+      if (compacted) {
+        task.sessionId = "";
+      }
       await this.syncTaskCard(task);
 
       if (!this.config.feishuInteractiveCardsEnabled) {
@@ -944,6 +1095,7 @@ export class BridgeService {
       await task.streamChain;
       task.status = task.abortRequested ? "cancelled" : "failed";
       task.lastErrorMessage = error.message || String(error);
+      task.finalMessage = "";
       const autoCommitResult = await this.autoCommitWorkspace(this.config, task);
       task.autoCommitSummary = this.formatAutoCommitResult(autoCommitResult);
       await this.syncTaskCard(task);
@@ -996,6 +1148,7 @@ export class BridgeService {
     return {
       conversations: this.store.conversationCount(),
       interruptedTasks: this.interruptedTasks.length,
+      contextCompactionCount: this.metrics.contextCompactionCount,
       queuedCancelCount: this.metrics.queuedCancelCount,
       queuedTasks: this.queue.length,
       recoveredInterruptedCount: this.metrics.recoveredInterruptedCount,
