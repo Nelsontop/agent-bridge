@@ -1,4 +1,5 @@
 import { runCodexTask } from "./codex-runner.js";
+import { autoCommitWorkspace } from "./git-commit.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,7 +59,7 @@ function helpText() {
   return [
     "Codex Feishu Bridge 命令：",
     "/help 查看帮助",
-    "/status 查看当前会话与任务状态",
+    "/status 查看当前会话、工作目录与任务状态",
     "/reset 清空当前聊天绑定的 Codex 会话",
     "/abort <任务号> 终止当前运行中的任务",
     "",
@@ -74,6 +75,57 @@ function truncateText(text, maxChars) {
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
+function buildReplyTarget(config, event) {
+  return {
+    chatId: event.message.chat_id,
+    replyToMessageId: config.feishuReplyToMessageEnabled
+      ? event.message.message_id
+      : ""
+  };
+}
+
+function buildCardButton(text, type, value) {
+  return {
+    tag: "button",
+    text: {
+      tag: "plain_text",
+      content: text
+    },
+    type,
+    value
+  };
+}
+
+function extractEventType(eventEnvelope) {
+  return eventEnvelope?.header?.event_type || eventEnvelope?.event?.type || "";
+}
+
+function extractCardAction(eventEnvelope) {
+  const event = eventEnvelope?.event || {};
+  const action = event.action || eventEnvelope?.action;
+  const value = action?.value || {};
+  if (!action || !value.action) {
+    return null;
+  }
+
+  return {
+    name: value.action,
+    value,
+    senderOpenId:
+      event.operator?.operator_id?.open_id ||
+      eventEnvelope?.operator?.operator_id?.open_id ||
+      "",
+    chatId: value.chatId || value.chat_id || "",
+    chatKey: value.chatKey || value.chat_key || "",
+    replyToMessageId:
+      value.replyToMessageId ||
+      value.reply_to_message_id ||
+      value.sourceMessageId ||
+      "",
+    taskId: value.taskId || value.task_id || ""
+  };
+}
+
 export class BridgeService {
   constructor(config, store, feishuClient) {
     this.config = config;
@@ -84,13 +136,27 @@ export class BridgeService {
     this.running = new Map();
   }
 
+  resolveWorkspaceDir(chatKey, chatId) {
+    return (
+      this.config.chatWorkspaceMappings.get(chatKey) ||
+      this.config.chatWorkspaceMappings.get(chatId) ||
+      this.config.codexWorkspaceDir
+    );
+  }
+
   async dispatchEvent(eventEnvelope) {
+    const eventType = extractEventType(eventEnvelope);
+    if (eventType === "card.action.trigger") {
+      await this.handleCardAction(eventEnvelope);
+      return null;
+    }
+
     const event = eventEnvelope.event;
     if (!event || event.message?.message_type === undefined) {
-      return;
+      return null;
     }
     if (event.sender?.sender_type && event.sender.sender_type !== "user") {
-      return;
+      return null;
     }
 
     const senderOpenId = event.sender?.sender_id?.open_id || "";
@@ -98,14 +164,20 @@ export class BridgeService {
       this.config.feishuAllowedOpenIds.size > 0 &&
       !this.config.feishuAllowedOpenIds.has(senderOpenId)
     ) {
-      await this.safeSend(event.message.chat_id, "当前用户未被授权使用这个 Codex 桥接器。");
-      return;
+      await this.safeSend(
+        buildReplyTarget(this.config, event),
+        "当前用户未被授权使用这个 Codex 桥接器。"
+      );
+      return null;
     }
 
     const rawText = parseContent(event);
     if (!rawText) {
-      await this.safeSend(event.message.chat_id, "当前仅支持文本消息。");
-      return;
+      await this.safeSend(
+        buildReplyTarget(this.config, event),
+        "当前仅支持文本消息。"
+      );
+      return null;
     }
 
     const mentions = event.message.mentions || [];
@@ -114,30 +186,82 @@ export class BridgeService {
       this.config.requireMentionInGroup &&
       !this.isBotMentioned(mentions)
     ) {
-      return;
+      return null;
     }
 
     const text = stripMentions(rawText, mentions);
+    const chatKey = chatKeyFor(event);
+    const target = buildReplyTarget(this.config, event);
     if (!text) {
-      await this.safeSend(event.message.chat_id, helpText());
-      return;
+      await this.safeSend(target, helpText());
+      return null;
     }
 
     if (text.startsWith("/")) {
-      await this.handleCommand(event, text);
+      await this.handleCommand({
+        commandText: text,
+        chatId: event.message.chat_id,
+        chatKey,
+        target,
+        senderOpenId
+      });
+      return null;
+    }
+
+    const task = this.enqueueTask(event, text, senderOpenId, target);
+    if (this.config.taskAckEnabled) {
+      await this.sendTaskAck(task);
+    }
+    this.pumpQueue();
+    return null;
+  }
+
+  async handleCardAction(eventEnvelope) {
+    const action = extractCardAction(eventEnvelope);
+    if (!action) {
       return;
     }
 
-    const task = this.enqueueTask(event, text, senderOpenId);
-    if (this.config.taskAckEnabled) {
-      const queueIndex = this.queue.findIndex((item) => item.id === task.id);
-      const position = queueIndex >= 0 ? `，队列位置 ${queueIndex + 1}` : "";
+    if (
+      this.config.feishuAllowedOpenIds.size > 0 &&
+      !this.config.feishuAllowedOpenIds.has(action.senderOpenId)
+    ) {
       await this.safeSend(
-        event.message.chat_id,
-        `已接收任务 ${task.id}${position}。任务完成后会自动回传结果。`
+        {
+          chatId: action.chatId,
+          replyToMessageId: action.replyToMessageId
+        },
+        "当前用户未被授权使用这个 Codex 桥接器。"
       );
+      return;
     }
-    this.pumpQueue();
+
+    if (action.name === "abort") {
+      await this.handleCommand({
+        commandText: `/abort ${action.taskId}`.trim(),
+        chatId: action.chatId,
+        chatKey: action.chatKey,
+        target: {
+          chatId: action.chatId,
+          replyToMessageId: action.replyToMessageId
+        },
+        senderOpenId: action.senderOpenId
+      });
+      return;
+    }
+
+    if (action.name === "reset") {
+      await this.handleCommand({
+        commandText: "/reset",
+        chatId: action.chatId,
+        chatKey: action.chatKey,
+        target: {
+          chatId: action.chatId,
+          replyToMessageId: action.replyToMessageId
+        },
+        senderOpenId: action.senderOpenId
+      });
+    }
   }
 
   isBotMentioned(mentions) {
@@ -152,14 +276,18 @@ export class BridgeService {
     );
   }
 
-  enqueueTask(event, prompt, senderOpenId) {
+  enqueueTask(event, prompt, senderOpenId, target) {
+    const chatKey = chatKeyFor(event);
     const id = formatTaskId(this.nextTaskNumber++);
+    const workspaceDir = this.resolveWorkspaceDir(chatKey, event.message.chat_id);
     const task = {
       id,
       prompt,
       senderOpenId,
       event,
-      chatKey: chatKeyFor(event),
+      target,
+      chatKey,
+      workspaceDir,
       enqueuedAt: new Date().toISOString(),
       status: "queued"
     };
@@ -167,55 +295,152 @@ export class BridgeService {
     return task;
   }
 
-  async handleCommand(event, text) {
-    const chatId = event.message.chat_id;
-    const chatKey = chatKeyFor(event);
-    const [command, ...rest] = text.trim().split(/\s+/);
+  buildActionCard({ title, body, chatId, chatKey, replyToMessageId, taskId }) {
+    const actions = [];
+    if (taskId) {
+      actions.push(
+        buildCardButton("Abort", "danger", {
+          action: "abort",
+          taskId,
+          chatId,
+          chatKey,
+          replyToMessageId
+        })
+      );
+    }
+    actions.push(
+      buildCardButton("Reset Session", "default", {
+        action: "reset",
+        chatId,
+        chatKey,
+        replyToMessageId
+      })
+    );
+
+    return {
+      config: {
+        wide_screen_mode: true
+      },
+      header: {
+        template: taskId ? "orange" : "blue",
+        title: {
+          tag: "plain_text",
+          content: title
+        }
+      },
+      elements: [
+        {
+          tag: "div",
+          text: {
+            tag: "lark_md",
+            content: body
+          }
+        },
+        {
+          tag: "action",
+          actions
+        }
+      ]
+    };
+  }
+
+  async sendTaskAck(task) {
+    const queueIndex = this.queue.findIndex((item) => item.id === task.id);
+    const position = queueIndex >= 0 ? `${queueIndex + 1}` : "1";
+    const body = [
+      `任务已入队：\`${task.id}\``,
+      `工作目录：\`${task.workspaceDir}\``,
+      `队列位置：${position}`
+    ].join("\n");
+
+    if (this.config.feishuInteractiveCardsEnabled) {
+      await this.safeSendCard(
+        task.target,
+        this.buildActionCard({
+          title: `Codex Task ${task.id}`,
+          body,
+          chatId: task.target.chatId,
+          chatKey: task.chatKey,
+          replyToMessageId: task.target.replyToMessageId,
+          taskId: task.id
+        })
+      );
+      return;
+    }
+
+    await this.safeSend(
+      task.target,
+      `已接收任务 ${task.id}，队列位置 ${position}。工作目录：${task.workspaceDir}`
+    );
+  }
+
+  async handleCommand({ commandText, chatId, chatKey, target }) {
+    const [command, ...rest] = commandText.trim().split(/\s+/);
 
     if (command === "/help") {
-      await this.safeSend(chatId, helpText());
+      await this.safeSend(target, helpText());
       return;
     }
 
     if (command === "/reset") {
       this.store.clearConversation(chatKey);
-      await this.safeSend(chatId, "已清空当前聊天绑定的 Codex 会话。");
+      await this.safeSend(target, "已清空当前聊天绑定的 Codex 会话。");
       return;
     }
 
     if (command === "/status") {
       const conversation = this.store.getConversation(chatKey);
-      const runningTask = [...this.running.values()].find((task) => task.chatKey === chatKey);
+      const runningTask = [...this.running.values()].find(
+        (task) => task.chatKey === chatKey
+      );
       const queuedCount = this.queue.filter((task) => task.chatKey === chatKey).length;
+      const workspaceDir = this.resolveWorkspaceDir(chatKey, chatId);
       const lines = [
         `chatKey: ${chatKey}`,
+        `workspace: ${workspaceDir}`,
         `sessionId: ${conversation?.sessionId || "无"}`,
         `running: ${runningTask ? `${runningTask.id} (${runningTask.startedAt})` : "无"}`,
         `queued: ${queuedCount}`
       ];
-      await this.safeSend(chatId, lines.join("\n"));
+
+      if (this.config.feishuInteractiveCardsEnabled) {
+        await this.safeSendCard(
+          target,
+          this.buildActionCard({
+            title: "Codex Status",
+            body: lines.join("\n"),
+            chatId,
+            chatKey,
+            replyToMessageId: target.replyToMessageId,
+            taskId: runningTask?.id || ""
+          })
+        );
+        return;
+      }
+
+      await this.safeSend(target, lines.join("\n"));
       return;
     }
 
     if (command === "/abort") {
       const taskId = rest[0];
       if (!taskId) {
-        await this.safeSend(chatId, "用法：/abort T0001");
+        await this.safeSend(target, "用法：/abort T0001");
         return;
       }
 
       const runningTask = this.running.get(taskId);
       if (!runningTask) {
-        await this.safeSend(chatId, `未找到运行中的任务 ${taskId}。`);
+        await this.safeSend(target, `未找到运行中的任务 ${taskId}。`);
         return;
       }
 
       runningTask.runner.cancel();
-      await this.safeSend(chatId, `已请求终止任务 ${taskId}。`);
+      await this.safeSend(target, `已请求终止任务 ${taskId}。`);
       return;
     }
 
-    await this.safeSend(chatId, `未知命令：${command}\n\n${helpText()}`);
+    await this.safeSend(target, `未知命令：${command}\n\n${helpText()}`);
   }
 
   pumpQueue() {
@@ -230,7 +455,7 @@ export class BridgeService {
     }
   }
 
-  queueStreamText(task, chatId, text) {
+  queueStreamText(task, target, text) {
     const normalized = String(text || "").trim();
     if (!normalized) {
       return;
@@ -247,7 +472,7 @@ export class BridgeService {
 
         const chunks = splitText(normalized, this.config.maxReplyChars);
         for (const chunk of chunks) {
-          await this.safeSend(chatId, chunk);
+          await this.safeSend(target, chunk);
         }
         task.lastStreamSentAt = Date.now();
       })
@@ -256,7 +481,7 @@ export class BridgeService {
       });
   }
 
-  handleRunnerEvent(task, chatId, event) {
+  handleRunnerEvent(task, target, event) {
     if (!this.config.feishuStreamOutputEnabled || !event?.item) {
       return;
     }
@@ -271,7 +496,7 @@ export class BridgeService {
       task.lastStreamedAgentMessage = text;
       this.queueStreamText(
         task,
-        chatId,
+        target,
         `任务 ${task.id} 进度更新：\n\n${text}`
       );
       return;
@@ -288,7 +513,7 @@ export class BridgeService {
       task.startedCommandIds.add(item.id);
       this.queueStreamText(
         task,
-        chatId,
+        target,
         `任务 ${task.id} 正在执行命令：\n${truncateText(item.command, this.config.maxReplyChars)}`
       );
       return;
@@ -315,8 +540,27 @@ export class BridgeService {
         lines.push("", output);
       }
 
-      this.queueStreamText(task, chatId, lines.join("\n"));
+      this.queueStreamText(task, target, lines.join("\n"));
     }
+  }
+
+  formatAutoCommitResult(result) {
+    if (!this.config.gitAutoCommitEnabled) {
+      return "";
+    }
+    if (result.status === "disabled") {
+      return "";
+    }
+    if (result.status === "committed") {
+      return `自动提交：已创建提交 ${result.commitId || "(unknown)"}`;
+    }
+    if (result.status === "skipped" && result.reason === "no-changes") {
+      return "自动提交：没有检测到变更";
+    }
+    if (result.status === "skipped" && result.reason === "not-git-repo") {
+      return "自动提交：当前工作目录不是 Git 仓库";
+    }
+    return `自动提交失败：${result.detail || result.reason || "unknown error"}`;
   }
 
   async runTask(task) {
@@ -328,13 +572,15 @@ export class BridgeService {
     task.startedCommandIds = new Set();
     task.completedCommandIds = new Set();
 
-    const chatId = task.event.message.chat_id;
     const conversation = this.store.getConversation(task.chatKey);
+    const sessionId =
+      conversation?.workspaceDir === task.workspaceDir ? conversation?.sessionId || null : null;
     const runner = runCodexTask(this.config, {
       prompt: task.prompt,
-      sessionId: conversation?.sessionId || null,
+      sessionId,
+      workspaceDir: task.workspaceDir,
       onEvent: (event) => {
-        this.handleRunnerEvent(task, chatId, event);
+        this.handleRunnerEvent(task, task.target, event);
       }
     });
 
@@ -347,12 +593,19 @@ export class BridgeService {
       this.store.upsertConversation(task.chatKey, {
         sessionId: result.sessionId,
         lastTaskId: task.id,
-        lastSenderOpenId: task.senderOpenId
+        lastSenderOpenId: task.senderOpenId,
+        workspaceDir: task.workspaceDir
       });
 
+      const autoCommitResult = await autoCommitWorkspace(this.config, task);
       const headerLines = [`任务 ${task.id} 已完成。`];
       if (result.sessionId) {
         headerLines.push(`session: ${result.sessionId}`);
+      }
+      headerLines.push(`workspace: ${task.workspaceDir}`);
+      const commitSummary = this.formatAutoCommitResult(autoCommitResult);
+      if (commitSummary) {
+        headerLines.push(commitSummary);
       }
 
       const alreadyStreamedFinalMessage =
@@ -364,25 +617,66 @@ export class BridgeService {
         : `${headerLines.join("\n")}\n\n${result.finalMessage}`;
       const chunks = splitText(finalText, this.config.maxReplyChars);
       for (const chunk of chunks) {
-        await this.safeSend(chatId, chunk);
+        await this.safeSend(task.target, chunk);
+      }
+
+      if (this.config.feishuInteractiveCardsEnabled) {
+        await this.safeSendCard(
+          task.target,
+          this.buildActionCard({
+            title: `Codex Task ${task.id}`,
+            body: [
+              "任务已完成。",
+              `工作目录：\`${task.workspaceDir}\``,
+              commitSummary || "自动提交未启用"
+            ].join("\n"),
+            chatId: task.target.chatId,
+            chatKey: task.chatKey,
+            replyToMessageId: task.target.replyToMessageId
+          })
+        );
       }
     } catch (error) {
       await task.streamChain;
-      await this.safeSend(
-        chatId,
-        `任务 ${task.id} 执行失败：\n${error.message || String(error)}`
-      );
+      const autoCommitResult = await autoCommitWorkspace(this.config, task);
+      const commitSummary = this.formatAutoCommitResult(autoCommitResult);
+      const text = [
+        `任务 ${task.id} 执行失败：`,
+        error.message || String(error)
+      ];
+      if (commitSummary) {
+        text.push("", commitSummary);
+      }
+      await this.safeSend(task.target, text.join("\n"));
     } finally {
       this.running.delete(task.id);
       this.pumpQueue();
     }
   }
 
-  async safeSend(chatId, text) {
+  async safeSend(target, text) {
+    if (!target?.chatId) {
+      return;
+    }
     try {
-      await this.feishuClient.sendText(chatId, text);
+      await this.feishuClient.sendText(target.chatId, text, {
+        replyToMessageId: target.replyToMessageId
+      });
     } catch (error) {
       console.error("[feishu] send failed:", error);
+    }
+  }
+
+  async safeSendCard(target, card) {
+    if (!target?.chatId) {
+      return;
+    }
+    try {
+      await this.feishuClient.sendCard(target.chatId, card, {
+        replyToMessageId: target.replyToMessageId
+      });
+    } catch (error) {
+      console.error("[feishu] send card failed:", error);
     }
   }
 

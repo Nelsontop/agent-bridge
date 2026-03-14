@@ -8,6 +8,10 @@ function jsonHeaders(token) {
   return headers;
 }
 
+function buildInteractiveContent(card) {
+  return JSON.stringify(card);
+}
+
 export class FeishuClient {
   constructor(config) {
     this.config = config;
@@ -45,18 +49,28 @@ export class FeishuClient {
     return this.cachedToken;
   }
 
-  async sendText(chatId, text) {
+  async sendMessage({ chatId, replyToMessageId, text, card }) {
     const token = await this.getTenantAccessToken();
+    const data = card
+      ? {
+          msg_type: "interactive",
+          content: buildInteractiveContent(card)
+        }
+      : {
+          msg_type: "text",
+          content: JSON.stringify({ text })
+        };
+    const url = replyToMessageId
+      ? `${this.config.feishuBaseUrl}/open-apis/im/v1/messages/${replyToMessageId}/reply`
+      : `${this.config.feishuBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`;
+    const body = replyToMessageId ? data : { receive_id: chatId, ...data };
+
     const response = await fetch(
-      `${this.config.feishuBaseUrl}/open-apis/im/v1/messages?receive_id_type=chat_id`,
+      url,
       {
         method: "POST",
         headers: jsonHeaders(token),
-        body: JSON.stringify({
-          receive_id: chatId,
-          msg_type: "text",
-          content: JSON.stringify({ text })
-        })
+        body: JSON.stringify(body)
       }
     );
 
@@ -66,5 +80,21 @@ export class FeishuClient {
     }
 
     return payload;
+  }
+
+  async sendText(chatId, text, options = {}) {
+    return this.sendMessage({
+      chatId,
+      text,
+      replyToMessageId: options.replyToMessageId
+    });
+  }
+
+  async sendCard(chatId, card, options = {}) {
+    return this.sendMessage({
+      chatId,
+      card,
+      replyToMessageId: options.replyToMessageId
+    });
   }
 }

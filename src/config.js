@@ -139,6 +139,30 @@ function expandHome(token) {
   return token;
 }
 
+function parseWorkspaceMappings(value, rootDir) {
+  const mappings = new Map();
+  for (const entry of String(value || "").split(/[;\n]/)) {
+    const item = entry.trim();
+    if (!item) {
+      continue;
+    }
+
+    const separatorIndex = item.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const rawKey = item.slice(0, separatorIndex).trim();
+    const rawPath = item.slice(separatorIndex + 1).trim();
+    if (!rawKey || !rawPath) {
+      continue;
+    }
+
+    mappings.set(rawKey, path.resolve(rootDir, expandHome(rawPath)));
+  }
+  return mappings;
+}
+
 function resolveCodexCommand() {
   const configuredCommand = process.env.CODEX_COMMAND || "";
   const parsedCommand = splitCommand(configuredCommand);
@@ -169,6 +193,14 @@ export function loadConfig(rootDir = process.cwd()) {
     rootDir,
     process.env.STATE_DIR || ".codex-feishu-bridge"
   );
+  const gitAutoCommitEnabled = asBoolean(
+    process.env.AUTO_COMMIT_AFTER_TASK_ENABLED,
+    false
+  );
+  const configuredMaxConcurrentTasks = Math.max(
+    1,
+    asNumber(process.env.MAX_CONCURRENT_TASKS, 1)
+  );
 
   return {
     rootDir,
@@ -186,9 +218,21 @@ export function loadConfig(rootDir = process.cwd()) {
       process.env.FEISHU_REQUIRE_MENTION_IN_GROUP,
       true
     ),
+    feishuReplyToMessageEnabled: asBoolean(
+      process.env.FEISHU_REPLY_TO_MESSAGE_ENABLED,
+      true
+    ),
+    feishuInteractiveCardsEnabled: asBoolean(
+      process.env.FEISHU_INTERACTIVE_CARDS_ENABLED,
+      true
+    ),
     codexBin: process.env.CODEX_BIN || "codex",
     codexCommand: resolveCodexCommand(),
     codexWorkspaceDir: workspaceDir,
+    chatWorkspaceMappings: parseWorkspaceMappings(
+      process.env.CHAT_WORKSPACE_MAPPINGS,
+      rootDir
+    ),
     codexModel: process.env.CODEX_MODEL || "",
     codexProfile: process.env.CODEX_PROFILE || "",
     codexSandbox: process.env.CODEX_SANDBOX || "workspace-write",
@@ -199,7 +243,7 @@ export function loadConfig(rootDir = process.cwd()) {
       true
     ),
     codexPrelude: process.env.CODEX_PRELUDE || DEFAULT_PRELUDE,
-    maxConcurrentTasks: Math.max(1, asNumber(process.env.MAX_CONCURRENT_TASKS, 1)),
+    maxConcurrentTasks: gitAutoCommitEnabled ? 1 : configuredMaxConcurrentTasks,
     maxReplyChars: Math.max(500, asNumber(process.env.MAX_REPLY_CHARS, 1800)),
     taskAckEnabled: asBoolean(process.env.TASK_ACK_ENABLED, true),
     feishuStreamOutputEnabled: asBoolean(
@@ -213,6 +257,9 @@ export function loadConfig(rootDir = process.cwd()) {
     feishuStreamUpdateMinIntervalMs: Math.max(
       0,
       asNumber(process.env.FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS, 1200)
-    )
+    ),
+    gitAutoCommitEnabled,
+    gitAutoCommitMessagePrefix:
+      process.env.AUTO_COMMIT_MESSAGE_PREFIX || "bridge: save"
   };
 }

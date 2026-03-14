@@ -5,14 +5,14 @@ function buildPrompt(prelude, userText) {
   return `${prelude.trim()}\n\n用户消息：\n${userText.trim()}`;
 }
 
-function buildArgs(config, prompt, sessionId) {
+function buildArgs(config, prompt, sessionId, workspaceDir) {
   const args = [];
   const bypassSandbox = config.codexCommand.includes(
     "--dangerously-bypass-approvals-and-sandbox"
   );
 
-  if (config.codexWorkspaceDir) {
-    args.push("-C", config.codexWorkspaceDir);
+  if (workspaceDir) {
+    args.push("-C", workspaceDir);
   }
   if (config.codexApprovalPolicy && !bypassSandbox) {
     args.push("-a", config.codexApprovalPolicy);
@@ -49,12 +49,13 @@ function buildArgs(config, prompt, sessionId) {
   return args;
 }
 
-export function runCodexTask(config, { prompt, sessionId, onEvent }) {
+export function runCodexTask(config, { prompt, sessionId, onEvent, workspaceDir }) {
   const fullPrompt = buildPrompt(config.codexPrelude, prompt);
-  const args = buildArgs(config, fullPrompt, sessionId);
+  const resolvedWorkspaceDir = workspaceDir || config.codexWorkspaceDir;
+  const args = buildArgs(config, fullPrompt, sessionId, resolvedWorkspaceDir);
   const [command, ...commandArgs] = config.codexCommand;
   const child = spawn(command, [...commandArgs, ...args], {
-    cwd: config.codexWorkspaceDir,
+    cwd: resolvedWorkspaceDir,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"]
   });
