@@ -11,11 +11,25 @@ function chatKeyFor(event) {
 
 function parseContent(event) {
   if (event.message.message_type !== "text") {
-    return null;
+    return {
+      text: null,
+      parseError: false
+    };
   }
 
-  const payload = JSON.parse(event.message.content || "{}");
-  return typeof payload.text === "string" ? payload.text : null;
+  try {
+    const payload = JSON.parse(event.message.content || "{}");
+    return {
+      text: typeof payload.text === "string" ? payload.text : null,
+      parseError: false
+    };
+  } catch (error) {
+    console.warn("[bridge] failed to parse message content:", error.message);
+    return {
+      text: null,
+      parseError: true
+    };
+  }
 }
 
 function stripMentions(text, mentions) {
@@ -171,11 +185,13 @@ export class BridgeService {
       return null;
     }
 
-    const rawText = parseContent(event);
-    if (!rawText) {
+    const parsedContent = parseContent(event);
+    if (!parsedContent.text) {
       await this.safeSend(
         buildReplyTarget(this.config, event),
-        "当前仅支持文本消息。"
+        parsedContent.parseError
+          ? "消息内容解析失败，暂不支持该消息格式。"
+          : "当前仅支持文本消息。"
       );
       return null;
     }
@@ -189,7 +205,7 @@ export class BridgeService {
       return null;
     }
 
-    const text = stripMentions(rawText, mentions);
+    const text = stripMentions(parsedContent.text, mentions);
     const chatKey = chatKeyFor(event);
     const target = buildReplyTarget(this.config, event);
     if (!text) {
@@ -434,6 +450,10 @@ export class BridgeService {
         await this.safeSend(target, `未找到运行中的任务 ${taskId}。`);
         return;
       }
+      if (runningTask.chatKey !== chatKey) {
+        await this.safeSend(target, `当前聊天没有运行中的任务 ${taskId}。`);
+        return;
+      }
 
       runningTask.runner.cancel();
       await this.safeSend(target, `已请求终止任务 ${taskId}。`);
@@ -448,11 +468,22 @@ export class BridgeService {
       this.running.size < this.config.maxConcurrentTasks &&
       this.queue.length > 0
     ) {
-      const task = this.queue.shift();
+      const nextTaskIndex = this.queue.findIndex(
+        (task) => !this.hasRunningTaskForChat(task.chatKey)
+      );
+      if (nextTaskIndex < 0) {
+        return;
+      }
+
+      const [task] = this.queue.splice(nextTaskIndex, 1);
       this.runTask(task).catch((error) => {
         console.error(`[task:${task.id}] unexpected error`, error);
       });
     }
+  }
+
+  hasRunningTaskForChat(chatKey) {
+    return [...this.running.values()].some((task) => task.chatKey === chatKey);
   }
 
   queueStreamText(task, target, text) {
