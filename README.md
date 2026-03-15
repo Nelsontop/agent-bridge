@@ -3,6 +3,7 @@
 一个本地桥接服务：通过飞书长连接接收机器人消息，把文本消息转成 `codex exec` / `codex exec resume` 任务，再把结果发回飞书。
 
 # 效果图
+https://github.com/Nelsontop/codex-bridge/blob/b802debeeca947a03f005a3648fd01cdcb441261/pic/cfe03db6-19f3-4cc3-ba80-402ed1ee3fb2.png
 pic/7b78cae5-aa1e-4053-81e9-6a103fab4e49.png
 
 ## 实现方案
