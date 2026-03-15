@@ -100,6 +100,12 @@ function matchesTaskReference(task, reference) {
   return normalized === task.id || normalized === buildTaskName(task);
 }
 
+function createTaskAbortError() {
+  const error = new Error("收到终止请求，任务在收尾阶段已取消。");
+  error.code = "TASK_ABORTED";
+  return error;
+}
+
 function helpText() {
   return [
     "Codex Feishu Bridge 命令：",
@@ -1130,6 +1136,12 @@ export class BridgeService {
     return `失败：${result.detail || result.reason || "unknown error"}`;
   }
 
+  ensureTaskNotAborted(task) {
+    if (task.abortRequested) {
+      throw createTaskAbortError();
+    }
+  }
+
   async finalizeTask(task) {
     this.running.delete(task.id);
     this.persistRuntime();
@@ -1169,6 +1181,7 @@ export class BridgeService {
     try {
       const result = await runner.result;
       await task.streamChain;
+      this.ensureTaskNotAborted(task);
       task.status = "completed";
       task.sessionId = result.sessionId || "";
       task.finalMessage = result.finalMessage;
@@ -1183,11 +1196,13 @@ export class BridgeService {
         workspaceDir: task.workspaceDir
       });
 
+      this.ensureTaskNotAborted(task);
       const autoCommitResult = await this.autoCommitWorkspace(this.config, task);
       task.autoCommitSummary = this.formatAutoCommitResult(autoCommitResult);
       let compacted = false;
       if (result.sessionId) {
         try {
+          this.ensureTaskNotAborted(task);
           const compactResult = await this.compactConversationContext(task, result.sessionId);
           compacted = compactResult.performed;
         } catch (error) {
@@ -1198,6 +1213,7 @@ export class BridgeService {
       if (compacted) {
         task.sessionId = "";
       }
+      this.ensureTaskNotAborted(task);
       await this.syncTaskCard(task);
 
       if (!this.config.feishuInteractiveCardsEnabled) {
@@ -1218,7 +1234,10 @@ export class BridgeService {
     } catch (error) {
       await task.streamChain;
       task.status = task.abortRequested ? "cancelled" : "failed";
-      task.lastErrorMessage = error.message || String(error);
+      task.lastErrorMessage =
+        task.abortRequested && task.lastErrorMessage
+          ? task.lastErrorMessage
+          : error.message || String(error);
       task.finalMessage = "";
       task.autoCommitSummary = "";
       await this.syncTaskCard(task);
@@ -1226,7 +1245,9 @@ export class BridgeService {
       if (!this.config.feishuInteractiveCardsEnabled) {
         await this.safeSend(
           task.target,
-          [`任务 ${buildTaskName(task)} 执行失败：`, task.lastErrorMessage].join("\n")
+          task.abortRequested
+            ? `任务 ${buildTaskName(task)} 已取消。\n${task.lastErrorMessage}`
+            : [`任务 ${buildTaskName(task)} 执行失败：`, task.lastErrorMessage].join("\n")
         );
       }
     } finally {

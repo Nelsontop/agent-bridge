@@ -35,6 +35,10 @@ function buildCommitMessage(prefix, task) {
   return `${prefix} ${task.id}`;
 }
 
+function buildExpectedCommitMessage(config, task) {
+  return buildCommitMessage(config.gitAutoCommitMessagePrefix, task);
+}
+
 export async function autoCommitWorkspace(config, task) {
   const workspaceDir = task.workspaceDir;
   if (!config.gitAutoCommitEnabled || !workspaceDir) {
@@ -69,7 +73,7 @@ export async function autoCommitWorkspace(config, task) {
 
   const commit = await run(
     "git",
-    ["commit", "-m", buildCommitMessage(config.gitAutoCommitMessagePrefix, task)],
+    ["commit", "-m", buildExpectedCommitMessage(config, task)],
     workspaceDir
   );
   if (commit.code !== 0) {
@@ -85,5 +89,56 @@ export async function autoCommitWorkspace(config, task) {
     status: "committed",
     commitId: head.code === 0 ? head.stdout : "",
     detail: commit.stdout || commit.stderr
+  };
+}
+
+export async function rollbackAutoCommitWorkspace(config, task, commitId) {
+  const workspaceDir = task.workspaceDir;
+  if (!config.gitAutoCommitEnabled || !workspaceDir || !commitId) {
+    return { status: "skipped", reason: "disabled" };
+  }
+
+  const repoCheck = await run("git", ["rev-parse", "--is-inside-work-tree"], workspaceDir);
+  if (repoCheck.code !== 0 || repoCheck.stdout !== "true") {
+    return { status: "skipped", reason: "not-git-repo" };
+  }
+
+  const head = await run("git", ["rev-parse", "--short", "HEAD"], workspaceDir);
+  if (head.code !== 0) {
+    return {
+      status: "failed",
+      reason: "head-error",
+      detail: head.stderr || head.stdout || `git rev-parse exited with ${head.code}`
+    };
+  }
+  if (head.stdout !== commitId) {
+    return { status: "skipped", reason: "head-moved" };
+  }
+
+  const subject = await run("git", ["log", "-1", "--format=%s"], workspaceDir);
+  if (subject.code !== 0) {
+    return {
+      status: "failed",
+      reason: "subject-error",
+      detail: subject.stderr || subject.stdout || `git log exited with ${subject.code}`
+    };
+  }
+  if (subject.stdout !== buildExpectedCommitMessage(config, task)) {
+    return { status: "skipped", reason: "message-mismatch" };
+  }
+
+  const reset = await run("git", ["reset", "--mixed", "HEAD~1"], workspaceDir);
+  if (reset.code !== 0) {
+    return {
+      status: "failed",
+      reason: "reset-error",
+      detail: reset.stderr || reset.stdout || `git reset exited with ${reset.code}`
+    };
+  }
+
+  return {
+    status: "rolled-back",
+    commitId,
+    detail: reset.stdout || reset.stderr
   };
 }

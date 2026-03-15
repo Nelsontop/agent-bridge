@@ -456,6 +456,46 @@ test("card action cancels a running task and skips auto commit", async () => {
   );
 });
 
+test("abort during post-run wait skips auto commit and marks the task cancelled", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  let autoCommitCalls = 0;
+  const bridge = new BridgeService(
+    createConfig({ feishuInteractiveCardsEnabled: false }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => {
+        autoCommitCalls += 1;
+        return { status: "committed", commitId: "abc123" };
+      },
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 1);
+
+  runner.pending[0].resolve({
+    finalMessage: "任务已经完成",
+    sessionId: "thread_new"
+  });
+  await bridge.handleCommand({
+    commandText: "/abort T001",
+    chatId: "oc_test_chat",
+    chatKey: "p2p:oc_test_chat",
+    target: {
+      chatId: "oc_test_chat",
+      replyToMessageId: "om_source_message_1"
+    }
+  });
+
+  await waitFor(() => bridge.running.size === 0);
+
+  assert.equal(autoCommitCalls, 0);
+  assert.equal(client.texts.at(-1).text.includes("已取消"), true);
+});
+
 test("flattened WS card action can cancel a queued task", async () => {
   const client = createClient();
   const runner = createRunnerController();
