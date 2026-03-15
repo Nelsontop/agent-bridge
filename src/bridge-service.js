@@ -660,24 +660,40 @@ export class BridgeService {
 
   countPendingTasksForChat(chatKey) {
     const queuedCount = this.queue.filter((task) => task.chatKey === chatKey).length;
-    const runningCount = [...this.running.values()].filter(
-      (task) => task.chatKey === chatKey
-    ).length;
+    const runningCount = this.countRunningTasksForChat(chatKey);
     return queuedCount + runningCount;
   }
 
-  countPendingTasksForUser(senderOpenId) {
+  countRunningTasksForChat(chatKey) {
+    return [...this.running.values()].filter((task) => task.chatKey === chatKey).length;
+  }
+
+  countPendingTasksForUser(senderOpenId, chatKey = "") {
     if (!senderOpenId) {
       return 0;
     }
 
     const queuedCount = this.queue.filter(
-      (task) => task.senderOpenId === senderOpenId
+      (task) => task.senderOpenId === senderOpenId && (!chatKey || task.chatKey === chatKey)
     ).length;
     const runningCount = [...this.running.values()].filter(
-      (task) => task.senderOpenId === senderOpenId
+      (task) => task.senderOpenId === senderOpenId && (!chatKey || task.chatKey === chatKey)
     ).length;
     return queuedCount + runningCount;
+  }
+
+  findQueuePositionForTask(task) {
+    let position = 0;
+    for (const queuedTask of this.queue) {
+      if (queuedTask.chatKey !== task.chatKey) {
+        continue;
+      }
+      position += 1;
+      if (queuedTask.id === task.id) {
+        return position;
+      }
+    }
+    return 0;
   }
 
   async resumeRecoveredTasks() {
@@ -870,12 +886,12 @@ export class BridgeService {
       return null;
     }
 
-    const pendingForUser = this.countPendingTasksForUser(senderOpenId);
+    const pendingForUser = this.countPendingTasksForUser(senderOpenId, chatKey);
     if (pendingForUser >= this.config.maxQueuedTasksPerUser) {
       this.metrics.rejectedByUserLimit += 1;
       await this.safeSend(
         target,
-        `当前用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
+        `当前聊天内该用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
       );
       return null;
     }
@@ -1050,12 +1066,12 @@ export class BridgeService {
       return;
     }
 
-    const pendingForUser = this.countPendingTasksForUser(task.senderOpenId);
+    const pendingForUser = this.countPendingTasksForUser(task.senderOpenId, chatKey);
     if (pendingForUser >= this.config.maxQueuedTasksPerUser) {
       this.metrics.rejectedByUserLimit += 1;
       await this.safeSend(
         target,
-        `当前用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
+        `当前聊天内该用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
       );
       return;
     }
@@ -1079,7 +1095,7 @@ export class BridgeService {
     task.streamChain = Promise.resolve();
     task.workspaceDir = task.workspaceDir || this.resolveWorkspaceDir(chatKey, chatId);
     this.queue.push(task);
-    const queuePosition = this.queue.findIndex((item) => item.id === task.id) + 1;
+    const queuePosition = this.findQueuePositionForTask(task);
     this.persistRuntime();
     await this.syncTaskCard(task);
     await this.refreshQueuedTaskCards();
@@ -1133,7 +1149,7 @@ export class BridgeService {
       `**工作目录**：\`${task.workspaceDir}\``
     ];
 
-    const queueIndex = this.queue.findIndex((item) => item.id === task.id);
+    const queueIndex = this.findQueuePositionForTask(task) - 1;
     if (task.status === "queued" && queueIndex >= 0) {
       bodyLines.push(`**队列位置**：${queueIndex + 1}`);
     }
@@ -1217,7 +1233,7 @@ export class BridgeService {
 
     await this.safeSend(
       task.target,
-      `已接收任务 ${taskName}，队列位置 ${this.queue.findIndex((item) => item.id === task.id) + 1}。工作目录：${task.workspaceDir}`
+      `已接收任务 ${taskName}，队列位置 ${this.findQueuePositionForTask(task)}。工作目录：${task.workspaceDir}`
     );
   }
 
@@ -1499,12 +1515,9 @@ export class BridgeService {
   }
 
   pumpQueue() {
-    while (
-      this.running.size < this.config.maxConcurrentTasks &&
-      this.queue.length > 0
-    ) {
+    while (this.queue.length > 0) {
       const nextTaskIndex = this.queue.findIndex(
-        (task) => !this.hasRunningTaskForChat(task.chatKey)
+        (task) => this.countRunningTasksForChat(task.chatKey) < this.config.maxConcurrentTasks
       );
       if (nextTaskIndex < 0) {
         return;

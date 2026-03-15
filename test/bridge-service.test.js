@@ -379,6 +379,205 @@ test("reset clears the session but preserves the bound workspace", async () => {
   assert.equal(client.texts.at(-1).text.includes("工作目录绑定保留"), true);
 });
 
+test("different bound groups run on independent agents even when per-group concurrency is 1", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig({ maxConcurrentTasks: 1, requireMentionInGroup: false }),
+    createStore({
+      conversations: {
+        "group:group-a": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-a"
+        },
+        "group:group-b": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-b"
+        }
+      }
+    }),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-a",
+      messageId: "group-a-msg-1",
+      text: "请处理 A 群任务"
+    })
+  );
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-b",
+      messageId: "group-b-msg-1",
+      text: "请处理 B 群任务"
+    })
+  );
+
+  assert.equal(runner.calls.length, 2);
+  assert.equal(bridge.running.size, 2);
+  assert.equal(runner.calls[0].workspaceDir, "/tmp/group-a");
+  assert.equal(runner.calls[1].workspaceDir, "/tmp/group-b");
+
+  runner.pending[0].resolve({
+    finalMessage: "done a",
+    sessionId: "thread_group_a"
+  });
+  runner.pending[1].resolve({
+    finalMessage: "done b",
+    sessionId: "thread_group_b"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
+test("same user pending limits are scoped to the current group", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig({
+      feishuInteractiveCardsEnabled: false,
+      maxConcurrentTasks: 1,
+      maxQueuedTasksPerUser: 1,
+      requireMentionInGroup: false
+    }),
+    createStore({
+      conversations: {
+        "group:group-a": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-a"
+        },
+        "group:group-b": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-b"
+        }
+      }
+    }),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-a",
+      messageId: "group-a-msg-limit-1",
+      text: "请处理 A 群限流任务"
+    })
+  );
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-b",
+      messageId: "group-b-msg-limit-1",
+      text: "请处理 B 群限流任务"
+    })
+  );
+
+  assert.equal(runner.calls.length, 2);
+  assert.equal(client.texts.some((item) => item.text.includes("当前聊天内该用户待处理任务已达上限")), false);
+
+  runner.pending[0].resolve({
+    finalMessage: "done a",
+    sessionId: "thread_group_limit_a"
+  });
+  runner.pending[1].resolve({
+    finalMessage: "done b",
+    sessionId: "thread_group_limit_b"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
+test("queue position is counted independently per group", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig({
+      feishuInteractiveCardsEnabled: false,
+      maxConcurrentTasks: 1,
+      requireMentionInGroup: false
+    }),
+    createStore({
+      conversations: {
+        "group:group-a": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-a"
+        },
+        "group:group-b": {
+          bindingStatus: "bound",
+          sessionId: "",
+          workspaceDir: "/tmp/group-b"
+        }
+      }
+    }),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-a",
+      messageId: "group-a-msg-queue-1",
+      text: "先跑 A 群第一个任务"
+    })
+  );
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-b",
+      messageId: "group-b-msg-queue-1",
+      text: "先跑 B 群第一个任务"
+    })
+  );
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-b",
+      messageId: "group-b-msg-queue-2",
+      text: "B 群第二个任务排队"
+    })
+  );
+  assert.equal(client.texts.at(-1).text.includes("队列位置 1"), true);
+
+  await bridge.dispatchEvent(
+    createGroupMessageEvent({
+      chatId: "group-a",
+      messageId: "group-a-msg-queue-2",
+      text: "A 群第二个任务排队"
+    })
+  );
+  assert.equal(client.texts.at(-1).text.includes("队列位置 1"), true);
+
+  runner.pending[0].resolve({
+    finalMessage: "done a1",
+    sessionId: "thread_group_queue_a1"
+  });
+  runner.pending[1].resolve({
+    finalMessage: "done b1",
+    sessionId: "thread_group_queue_b1"
+  });
+  await waitFor(() => runner.calls.length === 4);
+  runner.pending[2].resolve({
+    finalMessage: "done b2",
+    sessionId: "thread_group_queue_b2"
+  });
+  runner.pending[3].resolve({
+    finalMessage: "done a2",
+    sessionId: "thread_group_queue_a2"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
 test("dispatchEvent ignores duplicate message events with the same source message id", async () => {
   const client = createClient();
   const runner = createRunnerController();
@@ -427,10 +626,10 @@ test("pumpQueue skips blocked tasks from the same chat", () => {
 
   bridge.pumpQueue();
 
-  assert.deepEqual(startedTaskIds, ["T0003"]);
+  assert.deepEqual(startedTaskIds, ["T0002", "T0003"]);
   assert.deepEqual(
     bridge.queue.map((task) => task.id),
-    ["T0002"]
+    []
   );
 });
 
