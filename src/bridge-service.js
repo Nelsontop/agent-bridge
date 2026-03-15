@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
-import { autoCommitWorkspace as defaultAutoCommitWorkspace } from "./git-commit.js";
+import {
+  autoCommitWorkspace as defaultAutoCommitWorkspace,
+  rollbackAutoCommitWorkspace as defaultRollbackAutoCommitWorkspace
+} from "./git-commit.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -305,6 +308,8 @@ export class BridgeService {
     this.runCodexTask = dependencies.runCodexTask || defaultRunCodexTask;
     this.autoCommitWorkspace =
       dependencies.autoCommitWorkspace || defaultAutoCommitWorkspace;
+    this.rollbackAutoCommitWorkspace =
+      dependencies.rollbackAutoCommitWorkspace || defaultRollbackAutoCommitWorkspace;
     this.metrics = {
       contextCompactionCount: 0,
       queuedCancelCount: 0,
@@ -1136,6 +1141,25 @@ export class BridgeService {
     return `失败：${result.detail || result.reason || "unknown error"}`;
   }
 
+  formatAutoCommitRollbackResult(result) {
+    if (!this.config.gitAutoCommitEnabled || !result) {
+      return "";
+    }
+    if (result.status === "rolled-back") {
+      return `已回滚自动提交 ${result.commitId || "(unknown)"}`;
+    }
+    if (result.status === "skipped") {
+      if (result.reason === "head-moved") {
+        return "自动提交未回滚：HEAD 已变化";
+      }
+      if (result.reason === "message-mismatch") {
+        return "自动提交未回滚：最新提交不属于当前任务";
+      }
+      return "";
+    }
+    return `自动提交回滚失败：${result.detail || result.reason || "unknown error"}`;
+  }
+
   ensureTaskNotAborted(task) {
     if (task.abortRequested) {
       throw createTaskAbortError();
@@ -1178,6 +1202,7 @@ export class BridgeService {
     this.persistRuntime();
     await this.syncTaskCard(task);
 
+    let autoCommitResult = null;
     try {
       const result = await runner.result;
       await task.streamChain;
@@ -1197,7 +1222,7 @@ export class BridgeService {
       });
 
       this.ensureTaskNotAborted(task);
-      const autoCommitResult = await this.autoCommitWorkspace(this.config, task);
+      autoCommitResult = await this.autoCommitWorkspace(this.config, task);
       task.autoCommitSummary = this.formatAutoCommitResult(autoCommitResult);
       let compacted = false;
       if (result.sessionId) {
@@ -1240,6 +1265,14 @@ export class BridgeService {
           : error.message || String(error);
       task.finalMessage = "";
       task.autoCommitSummary = "";
+      if (task.abortRequested && autoCommitResult?.status === "committed") {
+        const rollbackResult = await this.rollbackAutoCommitWorkspace(
+          this.config,
+          task,
+          autoCommitResult.commitId
+        );
+        task.autoCommitSummary = this.formatAutoCommitRollbackResult(rollbackResult);
+      }
       await this.syncTaskCard(task);
 
       if (!this.config.feishuInteractiveCardsEnabled) {

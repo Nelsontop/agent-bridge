@@ -460,6 +460,7 @@ test("abort during post-run wait skips auto commit and marks the task cancelled"
   const client = createClient();
   const runner = createRunnerController();
   let autoCommitCalls = 0;
+  let rollbackCalls = 0;
   const bridge = new BridgeService(
     createConfig({ feishuInteractiveCardsEnabled: false }),
     createStore(),
@@ -468,6 +469,10 @@ test("abort during post-run wait skips auto commit and marks the task cancelled"
       autoCommitWorkspace: async () => {
         autoCommitCalls += 1;
         return { status: "committed", commitId: "abc123" };
+      },
+      rollbackAutoCommitWorkspace: async () => {
+        rollbackCalls += 1;
+        return { status: "rolled-back", commitId: "abc123" };
       },
       runCodexTask: runner.runCodexTask.bind(runner)
     }
@@ -493,6 +498,51 @@ test("abort during post-run wait skips auto commit and marks the task cancelled"
   await waitFor(() => bridge.running.size === 0);
 
   assert.equal(autoCommitCalls, 0);
+  assert.equal(client.texts.at(-1).text.includes("已取消"), true);
+  assert.equal(rollbackCalls, 0);
+});
+
+test("abort after auto commit rolls back the task commit", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  let rollbackCalls = 0;
+  const bridge = new BridgeService(
+    createConfig({ feishuInteractiveCardsEnabled: false }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "committed", commitId: "abc123" }),
+      rollbackAutoCommitWorkspace: async () => {
+        rollbackCalls += 1;
+        return { status: "rolled-back", commitId: "abc123" };
+      },
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+  bridge.compactConversationContext = async () => {
+    await bridge.handleCommand({
+      commandText: "/abort T001",
+      chatId: "oc_test_chat",
+      chatKey: "p2p:oc_test_chat",
+      target: {
+        chatId: "oc_test_chat",
+        replyToMessageId: "om_source_message_1"
+      }
+    });
+    return { performed: false };
+  };
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 1);
+
+  runner.pending[0].resolve({
+    finalMessage: "任务已经完成",
+    sessionId: "thread_new"
+  });
+
+  await waitFor(() => bridge.running.size === 0);
+
+  assert.equal(rollbackCalls, 1);
   assert.equal(client.texts.at(-1).text.includes("已取消"), true);
 });
 
