@@ -68,7 +68,36 @@ function splitText(text, maxChars) {
 }
 
 function formatTaskId(number) {
-  return `T${String(number).padStart(4, "0")}`;
+  return `T${String(number).padStart(3, "0")}`;
+}
+
+function summarizeTaskPrompt(prompt, maxChars = 18) {
+  const firstLine = String(prompt || "")
+    .split(/\r?\n/, 1)[0]
+    .trim();
+  if (!firstLine) {
+    return "task";
+  }
+
+  const compact = firstLine
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  const normalized = compact || "task";
+  return normalized.slice(0, maxChars).replace(/^[-_]+|[-_]+$/g, "") || "task";
+}
+
+function buildTaskName(task) {
+  return `${task.id}-${task.nameSummary || summarizeTaskPrompt(task.prompt)}`;
+}
+
+function matchesTaskReference(task, reference) {
+  const normalized = String(reference || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  return normalized === task.id || normalized === buildTaskName(task);
 }
 
 function helpText() {
@@ -234,6 +263,7 @@ function sanitizeTaskSnapshot(task) {
     id: task.id,
     lastErrorMessage: task.lastErrorMessage || "",
     lastProgressText: task.lastProgressText || "",
+    nameSummary: task.nameSummary || summarizeTaskPrompt(task.prompt),
     prompt: task.prompt,
     recovered: Boolean(task.recovered),
     modelContextWindow: task.modelContextWindow || 0,
@@ -658,6 +688,7 @@ export class BridgeService {
       lastProgressText: "",
       lastStreamSentAt: 0,
       modelContextWindow: 0,
+      nameSummary: summarizeTaskPrompt(prompt),
       prompt,
       recovered: false,
       senderOpenId,
@@ -679,6 +710,7 @@ export class BridgeService {
   }
 
   buildTaskCard(task) {
+    const taskName = buildTaskName(task);
     const actions = [];
     if (task.status === "queued" || task.status === "running") {
       actions.push(
@@ -701,7 +733,7 @@ export class BridgeService {
     );
 
     const bodyLines = [
-      `**任务**：\`${task.id}\``,
+      `**任务**：\`${taskName}\``,
       `**状态**：${taskStatusLabel(task.status)}`,
       `**工作目录**：\`${task.workspaceDir}\``
     ];
@@ -769,7 +801,7 @@ export class BridgeService {
                 ? "blue"
                 : "orange",
         title: {
-          content: `任务 ${task.id}`,
+          content: taskName,
           tag: "plain_text"
         }
       }
@@ -777,6 +809,7 @@ export class BridgeService {
   }
 
   async sendTaskAck(task) {
+    const taskName = buildTaskName(task);
     if (this.config.feishuInteractiveCardsEnabled) {
       const payload = await this.safeSendCard(task.target, this.buildTaskCard(task));
       const messageId = payload?.data?.message_id || payload?.data?.message?.message_id || "";
@@ -789,7 +822,7 @@ export class BridgeService {
 
     await this.safeSend(
       task.target,
-      `已接收任务 ${task.id}，队列位置 ${this.queue.findIndex((item) => item.id === task.id) + 1}。工作目录：${task.workspaceDir}`
+      `已接收任务 ${taskName}，队列位置 ${this.queue.findIndex((item) => item.id === task.id) + 1}。工作目录：${task.workspaceDir}`
     );
   }
 
@@ -872,8 +905,8 @@ export class BridgeService {
         `workspace: ${workspaceDir}`,
         `sessionId: ${conversation?.sessionId || "无"}`,
         `memoryFile: ${conversation?.memoryFilePath || "无"}`,
-        `running: ${runningTask ? `${runningTask.id} (${runningTask.startedAt})` : "无"}`,
-        `queued: ${queuedTasks.map((task) => task.id).join(", ") || "无"}`,
+        `running: ${runningTask ? `${buildTaskName(runningTask)} (${runningTask.startedAt})` : "无"}`,
+        `queued: ${queuedTasks.map((task) => buildTaskName(task)).join(", ") || "无"}`,
         `interrupted: ${interruptedCount}`
       ];
 
@@ -907,16 +940,18 @@ export class BridgeService {
     }
 
     if (command === "/abort") {
-      const taskId = rest[0];
-      if (!taskId) {
-        await this.safeSend(target, "用法：/abort T0001");
+      const taskReference = rest[0];
+      if (!taskReference) {
+        await this.safeSend(target, "用法：/abort T001 或 /abort T001-任务摘要");
         return;
       }
 
-      const runningTask = this.running.get(taskId);
+      const runningTask =
+        this.running.get(taskReference) ||
+        [...this.running.values()].find((task) => matchesTaskReference(task, taskReference));
       if (runningTask) {
         if (runningTask.chatKey !== chatKey) {
-          await this.safeSend(target, `当前聊天没有运行中的任务 ${taskId}。`);
+          await this.safeSend(target, `当前聊天没有运行中的任务 ${taskReference}。`);
           return;
         }
 
@@ -925,13 +960,13 @@ export class BridgeService {
         runningTask.lastErrorMessage = "收到终止请求，正在结束任务。";
         await this.syncTaskCard(runningTask);
         if (!silentSuccess) {
-          await this.safeSend(target, `已请求终止任务 ${taskId}。`);
+          await this.safeSend(target, `已请求终止任务 ${buildTaskName(runningTask)}。`);
         }
         return;
       }
 
       const queuedIndex = this.queue.findIndex(
-        (task) => task.id === taskId && task.chatKey === chatKey
+        (task) => task.chatKey === chatKey && matchesTaskReference(task, taskReference)
       );
       if (queuedIndex >= 0) {
         const [queuedTask] = this.queue.splice(queuedIndex, 1);
@@ -942,12 +977,12 @@ export class BridgeService {
         this.persistRuntime();
         await this.refreshQueuedTaskCards();
         if (!silentSuccess) {
-          await this.safeSend(target, `已取消排队中的任务 ${taskId}。`);
+          await this.safeSend(target, `已取消排队中的任务 ${buildTaskName(queuedTask)}。`);
         }
         return;
       }
 
-      await this.safeSend(target, `未找到任务 ${taskId}。`);
+      await this.safeSend(target, `未找到任务 ${taskReference}。`);
       return;
     }
 
@@ -1031,7 +1066,7 @@ export class BridgeService {
         return;
       }
 
-      this.queueStreamText(task, `任务 ${task.id} 进度更新：\n\n${text}`);
+      this.queueStreamText(task, `任务 ${buildTaskName(task)} 进度更新：\n\n${text}`);
       return;
     }
 
@@ -1046,7 +1081,7 @@ export class BridgeService {
       task.startedCommandIds.add(item.id);
       this.queueStreamText(
         task,
-        `任务 ${task.id} 正在执行命令：\n${truncateText(item.command, this.config.maxReplyChars)}`
+        `任务 ${buildTaskName(task)} 正在执行命令：\n${truncateText(item.command, this.config.maxReplyChars)}`
       );
       return;
     }
@@ -1062,7 +1097,7 @@ export class BridgeService {
         Math.max(200, this.config.maxReplyChars - 120)
       );
       const lines = [
-        `任务 ${task.id} 命令${item.exit_code === 0 ? "已完成" : "结束"}：`,
+        `任务 ${buildTaskName(task)} 命令${item.exit_code === 0 ? "已完成" : "结束"}：`,
         truncateText(item.command, this.config.maxReplyChars)
       ];
       if (item.exit_code !== null && item.exit_code !== undefined) {
@@ -1167,7 +1202,7 @@ export class BridgeService {
 
       if (!this.config.feishuInteractiveCardsEnabled) {
         const finalText = [
-          `任务 ${task.id} 已完成。`,
+          `任务 ${buildTaskName(task)} 已完成。`,
           task.sessionId ? `session: ${task.sessionId}` : "",
           `workspace: ${task.workspaceDir}`,
           task.autoCommitSummary ? `自动提交：${task.autoCommitSummary}` : "",
@@ -1192,7 +1227,7 @@ export class BridgeService {
       if (!this.config.feishuInteractiveCardsEnabled) {
         await this.safeSend(
           task.target,
-          [`任务 ${task.id} 执行失败：`, task.lastErrorMessage].join("\n")
+          [`任务 ${buildTaskName(task)} 执行失败：`, task.lastErrorMessage].join("\n")
         );
       }
     } finally {

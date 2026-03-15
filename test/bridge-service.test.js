@@ -291,6 +291,7 @@ test("real message event creates a shared card and resumes the existing session"
   await bridge.dispatchEvent(payload);
 
   assert.equal(client.cards.length, 1);
+  assert.equal(client.cards[0].card.header.title.content, "T001-请检查当前项目状态");
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0].sessionId, "thread_existing");
 
@@ -362,9 +363,10 @@ test("card action can cancel a queued task created from a real event payload", a
   await bridge.dispatchEvent(secondPayload);
 
   assert.equal(bridge.queue.length, 1);
-  assert.equal(bridge.queue[0].id, "T0002");
+  assert.equal(bridge.queue[0].id, "T002");
 
   const actionPayload = loadFixture("card.action.trigger.json");
+  actionPayload.event.action.value.taskId = "T002";
   await bridge.dispatchEvent(actionPayload);
 
   assert.equal(bridge.queue.length, 0);
@@ -372,6 +374,47 @@ test("card action can cancel a queued task created from a real event payload", a
     client.cardUpdates.some((update) => update.messageId === client.cards[1].payload.data.message_id),
     true
   );
+
+  runner.pending[0].resolve({
+    finalMessage: "first done",
+    sessionId: "thread_1"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
+test("abort command accepts the full task name", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig({ feishuInteractiveCardsEnabled: false, maxConcurrentTasks: 1 }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  const firstPayload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(firstPayload);
+
+  const secondPayload = loadFixture("message.receive_v1.json");
+  secondPayload.event.message.message_id = "om_source_message_2";
+  secondPayload.event.message.content = "{\"text\":\"请继续第二个任务\"}";
+  await bridge.dispatchEvent(secondPayload);
+
+  await bridge.handleCommand({
+    commandText: "/abort T002-请继续第二个任务",
+    chatId: "oc_test_chat",
+    chatKey: "p2p:oc_test_chat",
+    target: {
+      chatId: "oc_test_chat",
+      replyToMessageId: "om_source_message_2"
+    }
+  });
+
+  assert.equal(bridge.queue.length, 0);
+  assert.equal(client.texts.at(-1).text, "已取消排队中的任务 T002-请继续第二个任务。");
 
   runner.pending[0].resolve({
     finalMessage: "first done",
@@ -401,7 +444,9 @@ test("flattened WS card action can cancel a queued task", async () => {
   secondPayload.event.message.content = "{\"text\":\"请继续第二个任务\"}";
   await bridge.dispatchEvent(secondPayload);
 
-  await bridge.dispatchEvent(flattenEventEnvelope(loadFixture("card.action.trigger.json")));
+  const actionPayload = loadFixture("card.action.trigger.json");
+  actionPayload.event.action.value.taskId = "T002";
+  await bridge.dispatchEvent(flattenEventEnvelope(actionPayload));
 
   assert.equal(bridge.queue.length, 0);
   assert.equal(
