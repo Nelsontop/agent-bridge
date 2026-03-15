@@ -17,7 +17,7 @@ async function waitFor(check, timeoutMs = 8000) {
   throw new Error("Timed out while waiting for condition");
 }
 
-test("runCodexTask cancel terminates the whole process group", async () => {
+test("runCodexTask cancel terminates descendants even if they escape the parent process group", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-"));
   const parentScript = path.join(tempDir, "parent.mjs");
   const childScript = path.join(tempDir, "child.mjs");
@@ -43,6 +43,7 @@ test("runCodexTask cancel terminates the whole process group", async () => {
       "import { spawn } from \"node:child_process\";",
       "import fs from \"node:fs\";",
       "const child = spawn(process.execPath, [process.env.TEST_CHILD_SCRIPT], {",
+      "  detached: true,",
       "  stdio: \"ignore\"",
       "});",
       "fs.writeFileSync(process.env.TEST_CHILD_PID_FILE, String(child.pid));",

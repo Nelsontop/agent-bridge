@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 
 function buildPrompt(prelude, userText) {
@@ -65,6 +65,7 @@ export function runCodexTask(config, { prompt, sessionId, onEvent, workspaceDir 
   let latestSessionId = sessionId || null;
   let lastAgentMessage = "";
   let stderr = "";
+  let cancelRequested = false;
   let escalationTimer = null;
   let killTimer = null;
 
@@ -95,6 +96,60 @@ export function runCodexTask(config, { prompt, sessionId, onEvent, workspaceDir 
         throw error;
       }
     }
+  }
+
+  function listDescendantPids(rootPid) {
+    if (process.platform === "win32" || !rootPid) {
+      return [];
+    }
+
+    const result = spawnSync("ps", ["-eo", "pid=,ppid="], {
+      encoding: "utf8"
+    });
+    if (result.status !== 0) {
+      return [];
+    }
+
+    const childrenByParent = new Map();
+    for (const line of result.stdout.split(/\r?\n/)) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)$/);
+      if (!match) {
+        continue;
+      }
+      const pid = Number(match[1]);
+      const ppid = Number(match[2]);
+      if (!childrenByParent.has(ppid)) {
+        childrenByParent.set(ppid, []);
+      }
+      childrenByParent.get(ppid).push(pid);
+    }
+
+    const descendants = [];
+    const stack = [...(childrenByParent.get(rootPid) || [])];
+    while (stack.length > 0) {
+      const pid = stack.pop();
+      descendants.push(pid);
+      const children = childrenByParent.get(pid) || [];
+      stack.push(...children);
+    }
+    return descendants;
+  }
+
+  function signalDescendants(signal) {
+    for (const pid of listDescendantPids(child.pid)) {
+      try {
+        process.kill(pid, signal);
+      } catch (error) {
+        if (error.code !== "ESRCH") {
+          throw error;
+        }
+      }
+    }
+  }
+
+  function signalTaskTree(signal) {
+    signalDescendants(signal);
+    signalChild(signal);
   }
 
   const stdoutReader = readline.createInterface({ input: child.stdout });
@@ -155,13 +210,14 @@ export function runCodexTask(config, { prompt, sessionId, onEvent, workspaceDir 
     child,
     result,
     cancel() {
-      if (!resolved) {
-        signalChild("SIGINT");
+      if (!resolved && !cancelRequested) {
+        cancelRequested = true;
+        signalTaskTree("SIGINT");
         escalationTimer = setTimeout(() => {
-          signalChild("SIGTERM");
+          signalTaskTree("SIGTERM");
         }, 1500);
         killTimer = setTimeout(() => {
-          signalChild("SIGKILL");
+          signalTaskTree("SIGKILL");
         }, 5000);
       }
     }

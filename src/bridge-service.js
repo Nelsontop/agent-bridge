@@ -967,6 +967,7 @@ export class BridgeService {
         }
 
         runningTask.abortRequested = true;
+        console.log(`[task:${runningTask.id}] abort requested`);
         runningTask.runner.cancel();
         runningTask.lastErrorMessage = "收到终止请求，正在结束任务。";
         await this.syncTaskCard(runningTask);
@@ -1272,6 +1273,9 @@ export class BridgeService {
           autoCommitResult.commitId
         );
         task.autoCommitSummary = this.formatAutoCommitRollbackResult(rollbackResult);
+        console.log(
+          `[task:${task.id}] auto commit rollback result: ${rollbackResult.status}${rollbackResult.reason ? ` (${rollbackResult.reason})` : ""}`
+        );
       }
       await this.syncTaskCard(task);
 
