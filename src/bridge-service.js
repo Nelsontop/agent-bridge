@@ -153,7 +153,27 @@ function buildCardButton(text, type, value) {
 }
 
 function extractEventType(eventEnvelope) {
-  return eventEnvelope?.header?.event_type || eventEnvelope?.event?.type || "";
+  return (
+    eventEnvelope?.event_type ||
+    eventEnvelope?.header?.event_type ||
+    eventEnvelope?.event?.type ||
+    ""
+  );
+}
+
+function extractMessageEvent(eventEnvelope) {
+  if (eventEnvelope?.event?.message?.message_type !== undefined) {
+    return eventEnvelope.event;
+  }
+
+  if (eventEnvelope?.message?.message_type !== undefined) {
+    return {
+      message: eventEnvelope.message,
+      sender: eventEnvelope.sender
+    };
+  }
+
+  return null;
 }
 
 function extractCardAction(eventEnvelope) {
@@ -472,7 +492,7 @@ export class BridgeService {
       return null;
     }
 
-    const event = eventEnvelope.event;
+    const event = extractMessageEvent(eventEnvelope);
     if (!event || event.message?.message_type === undefined) {
       return null;
     }
@@ -662,7 +682,7 @@ export class BridgeService {
     const actions = [];
     if (task.status === "queued" || task.status === "running") {
       actions.push(
-        buildCardButton("Abort", "danger", {
+        buildCardButton("终止任务", "danger", {
           action: "abort",
           chatId: task.target.chatId,
           chatKey: task.chatKey,
@@ -672,7 +692,7 @@ export class BridgeService {
       );
     }
     actions.push(
-      buildCardButton("Reset Session", "default", {
+      buildCardButton("重置会话", "default", {
         action: "reset",
         chatId: task.target.chatId,
         chatKey: task.chatKey,
@@ -749,7 +769,7 @@ export class BridgeService {
                 ? "blue"
                 : "orange",
         title: {
-          content: `Codex Task ${task.id}`,
+          content: `任务 ${task.id}`,
           tag: "plain_text"
         }
       }
@@ -874,7 +894,7 @@ export class BridgeService {
           header: {
             template: "blue",
             title: {
-              content: "Codex Status",
+              content: "当前状态",
               tag: "plain_text"
             }
           }

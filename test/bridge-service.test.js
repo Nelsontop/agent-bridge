@@ -11,6 +11,15 @@ function loadFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, name), "utf8"));
 }
 
+function flattenEventEnvelope(payload) {
+  return {
+    ...(payload.header?.event_type
+      ? { event_type: payload.header.event_type }
+      : {}),
+    ...(payload.event || {})
+  };
+}
+
 function createConfig(overrides = {}) {
   return {
     chatWorkspaceMappings: new Map(),
@@ -295,6 +304,42 @@ test("real message event creates a shared card and resumes the existing session"
   assert.equal(client.cardUpdates.at(-1).messageId, client.cards[0].payload.data.message_id);
 });
 
+test("flattened WS message event creates a task and resumes the existing session", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const store = createStore({
+    conversations: {
+      "p2p:oc_test_chat": {
+        sessionId: "thread_existing",
+        workspaceDir: "/tmp/codex-workspace"
+      }
+    }
+  });
+  const bridge = new BridgeService(
+    createConfig(),
+    store,
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(flattenEventEnvelope(loadFixture("message.receive_v1.json")));
+
+  assert.equal(client.cards.length, 1);
+  assert.equal(runner.calls.length, 1);
+  assert.equal(runner.calls[0].sessionId, "thread_existing");
+
+  runner.pending[0].resolve({
+    finalMessage: "任务已经完成",
+    sessionId: "thread_new"
+  });
+  await waitFor(() => bridge.running.size === 0 && client.cardUpdates.length > 0);
+
+  assert.equal(store.getConversation("p2p:oc_test_chat").sessionId, "thread_new");
+});
+
 test("card action can cancel a queued task created from a real event payload", async () => {
   const client = createClient();
   const runner = createRunnerController();
@@ -321,6 +366,42 @@ test("card action can cancel a queued task created from a real event payload", a
 
   const actionPayload = loadFixture("card.action.trigger.json");
   await bridge.dispatchEvent(actionPayload);
+
+  assert.equal(bridge.queue.length, 0);
+  assert.equal(
+    client.cardUpdates.some((update) => update.messageId === client.cards[1].payload.data.message_id),
+    true
+  );
+
+  runner.pending[0].resolve({
+    finalMessage: "first done",
+    sessionId: "thread_1"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
+test("flattened WS card action can cancel a queued task", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig({ maxConcurrentTasks: 1 }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(payload);
+
+  const secondPayload = loadFixture("message.receive_v1.json");
+  secondPayload.event.message.message_id = "om_source_message_2";
+  secondPayload.event.message.content = "{\"text\":\"请继续第二个任务\"}";
+  await bridge.dispatchEvent(secondPayload);
+
+  await bridge.dispatchEvent(flattenEventEnvelope(loadFixture("card.action.trigger.json")));
 
   assert.equal(bridge.queue.length, 0);
   assert.equal(
