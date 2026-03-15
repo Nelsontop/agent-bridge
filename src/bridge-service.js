@@ -753,6 +753,9 @@ export class BridgeService {
     if (task.status === "queued" && queueIndex >= 0) {
       bodyLines.push(`**队列位置**：${queueIndex + 1}`);
     }
+    if (task.status === "queued" || task.status === "running") {
+      bodyLines.push(`**终止兜底**：\`/abort ${task.id}\``);
+    }
     if (task.sessionId) {
       bodyLines.push(`**Session**：\`${task.sessionId}\``);
     }

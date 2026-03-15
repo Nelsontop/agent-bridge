@@ -3,6 +3,15 @@ import { fetchJsonWithRetry } from "./http-utils.js";
 
 const { WSClient, LoggerLevel } = larkSdk;
 
+export function extractWsEventType(payload) {
+  return (
+    payload?.event_type ||
+    payload?.header?.event_type ||
+    payload?.event?.type ||
+    ""
+  );
+}
+
 function createMetrics() {
   return {
     dispatchCount: 0,
@@ -10,7 +19,9 @@ function createMetrics() {
     lastErrorAt: "",
     lastErrorMessage: "",
     lastEventAt: "",
+    lastEventType: "",
     requestCount: 0,
+    recentEventTypes: [],
     retryCount: 0,
     timeoutCount: 0
   };
@@ -35,6 +46,15 @@ export class FeishuWsClient {
   trackFailure(error) {
     this.metrics.lastErrorAt = new Date().toISOString();
     this.metrics.lastErrorMessage = error.message || String(error);
+  }
+
+  recordEvent(payload) {
+    const eventType = extractWsEventType(payload) || "unknown";
+    this.metrics.dispatchCount += 1;
+    this.metrics.lastEventAt = new Date().toISOString();
+    this.metrics.lastEventType = eventType;
+    this.metrics.recentEventTypes = [...this.metrics.recentEventTypes, eventType].slice(-10);
+    console.log(`[ws] incoming event: ${eventType}`);
   }
 
   async request(options) {
@@ -76,8 +96,7 @@ export class FeishuWsClient {
     await this.client.start({
       eventDispatcher: {
         invoke: async (payload) => {
-          this.metrics.dispatchCount += 1;
-          this.metrics.lastEventAt = new Date().toISOString();
+          this.recordEvent(payload);
 
           try {
             await this.bridgeService.dispatchEvent(payload);

@@ -292,6 +292,7 @@ test("real message event creates a shared card and resumes the existing session"
 
   assert.equal(client.cards.length, 1);
   assert.equal(client.cards[0].card.header.title.content, "T001-请检查当前项目状态");
+  assert.equal(client.cards[0].card.elements[0].text.content.includes("`/abort T001`"), true);
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0].sessionId, "thread_existing");
 
