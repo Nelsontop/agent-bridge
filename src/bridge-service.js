@@ -17,6 +17,7 @@ function sleep(ms) {
 
 const RECENT_EVENT_TTL_MS = 5 * 60 * 1000;
 const MAX_RECENT_EVENTS = 500;
+const MAX_RECENT_TASK_REQUESTS = 500;
 const MAX_INTERACTION_OPTIONS = 3;
 const INTERACTION_BLOCK_PATTERN = /```codex_bridge_interaction\s*([\s\S]*?)```/i;
 
@@ -82,6 +83,10 @@ function splitText(text, maxChars) {
 
 function formatTaskId(number) {
   return `T${String(number).padStart(3, "0")}`;
+}
+
+function normalizeTaskRequestText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
 }
 
 const SUMMARY_ACTION_RULES = [
@@ -552,6 +557,7 @@ export class BridgeService {
       lastContextUsageRatio: 0,
       lastModelContextWindow: 0,
       contextCompactionCount: 0,
+      duplicateTaskCount: 0,
       duplicateEventCount: 0,
       queuedCancelCount: 0,
       recoveredInterruptedCount: 0,
@@ -560,6 +566,7 @@ export class BridgeService {
       rejectedByUserLimit: 0
     };
     this.recentEvents = new Map();
+    this.recentTaskRequests = new Map();
     this.runtime = new TaskRuntime(this.store);
     this.running = this.runtime.running;
     this.commandRouter = new BridgeCommandRouter(this, {
@@ -932,6 +939,23 @@ export class BridgeService {
     }
   }
 
+  pruneRecentTaskRequests(now = Date.now()) {
+    for (const [key, expiresAt] of this.recentTaskRequests) {
+      if (expiresAt > now) {
+        continue;
+      }
+      this.recentTaskRequests.delete(key);
+    }
+
+    while (this.recentTaskRequests.size > MAX_RECENT_TASK_REQUESTS) {
+      const oldestKey = this.recentTaskRequests.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      this.recentTaskRequests.delete(oldestKey);
+    }
+  }
+
   rememberRecentEvent(eventKey, now = Date.now()) {
     if (!eventKey) {
       return false;
@@ -947,6 +971,59 @@ export class BridgeService {
     this.recentEvents.delete(eventKey);
     this.recentEvents.set(eventKey, now + RECENT_EVENT_TTL_MS);
     this.pruneRecentEvents(now);
+    return false;
+  }
+
+  buildTaskRequestKey(chatKey, senderOpenId, prompt) {
+    const normalizedPrompt = normalizeTaskRequestText(prompt);
+    if (!chatKey || !senderOpenId || !normalizedPrompt) {
+      return "";
+    }
+    return `${chatKey}:${senderOpenId}:${normalizedPrompt}`;
+  }
+
+  hasEquivalentPendingTask(chatKey, senderOpenId, prompt) {
+    const normalizedPrompt = normalizeTaskRequestText(prompt);
+    if (!normalizedPrompt) {
+      return false;
+    }
+
+    return (
+      this.queue.some(
+        (task) =>
+          task.chatKey === chatKey &&
+          task.senderOpenId === senderOpenId &&
+          normalizeTaskRequestText(task.prompt) === normalizedPrompt
+      ) ||
+      [...this.running.values()].some(
+        (task) =>
+          task.chatKey === chatKey &&
+          task.senderOpenId === senderOpenId &&
+          normalizeTaskRequestText(task.prompt) === normalizedPrompt
+      )
+    );
+  }
+
+  rememberRecentTaskRequest(chatKey, senderOpenId, prompt, now = Date.now()) {
+    if (this.config.duplicateTaskWindowMs <= 0) {
+      return false;
+    }
+
+    const taskRequestKey = this.buildTaskRequestKey(chatKey, senderOpenId, prompt);
+    if (!taskRequestKey) {
+      return false;
+    }
+
+    this.pruneRecentTaskRequests(now);
+    const expiresAt = this.recentTaskRequests.get(taskRequestKey);
+    if (expiresAt && expiresAt > now) {
+      this.metrics.duplicateTaskCount += 1;
+      return true;
+    }
+
+    this.recentTaskRequests.delete(taskRequestKey);
+    this.recentTaskRequests.set(taskRequestKey, now + this.config.duplicateTaskWindowMs);
+    this.pruneRecentTaskRequests(now);
     return false;
   }
 
@@ -1100,6 +1177,17 @@ export class BridgeService {
         target,
         `当前聊天内该用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
       );
+      return null;
+    }
+
+    if (this.hasEquivalentPendingTask(chatKey, senderOpenId, text)) {
+      this.metrics.duplicateTaskCount += 1;
+      await this.safeSend(target, "检测到相同指令已在执行或排队，已忽略这次重复请求。");
+      return null;
+    }
+
+    if (this.rememberRecentTaskRequest(chatKey, senderOpenId, text)) {
+      await this.safeSend(target, "检测到短时间内重复发送了相同指令，已忽略。");
       return null;
     }
 
@@ -1850,6 +1938,7 @@ export class BridgeService {
       conversations: this.store.conversationCount(),
       interruptedTasks: this.interruptedTasks.length,
       contextCompactionCount: this.metrics.contextCompactionCount,
+      duplicateTaskCount: this.metrics.duplicateTaskCount,
       duplicateEventCount: this.metrics.duplicateEventCount,
       lastCompactionDecision: this.metrics.lastCompactionDecision,
       lastCompactionTaskId: this.metrics.lastCompactionTaskId,

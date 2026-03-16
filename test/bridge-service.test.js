@@ -81,6 +81,7 @@ function createConfig(overrides = {}) {
     contextMemoryLoadFraction: 0.1,
     contextMemoryDir: path.join(os.tmpdir(), "codex-bridge-memory-default"),
     contextWindowFallbackTokens: 128000,
+    duplicateTaskWindowMs: 15000,
     feishuAllowedOpenIds: new Set(),
     feishuBotOpenId: "",
     feishuInteractiveCardsEnabled: true,
@@ -706,6 +707,44 @@ test("dispatchEvent ignores duplicate message events with the same source messag
   runner.pending[0].resolve({
     finalMessage: "done",
     sessionId: "thread_dedup"
+  });
+  await waitFor(() => bridge.running.size === 0);
+});
+
+test("dispatchEvent ignores duplicate task text while the same task is already running", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig(),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  const firstPayload = loadFixture("message.receive_v1.json");
+  firstPayload.event.message.message_id = "om_source_message_dup_1";
+  firstPayload.event.message.content = JSON.stringify({ text: "测试" });
+
+  const secondPayload = loadFixture("message.receive_v1.json");
+  secondPayload.event.message.message_id = "om_source_message_dup_2";
+  secondPayload.event.message.content = JSON.stringify({ text: "测试" });
+
+  await bridge.dispatchEvent(firstPayload);
+  await bridge.dispatchEvent(secondPayload);
+
+  assert.equal(runner.calls.length, 1);
+  assert.equal(bridge.getHealth().duplicateTaskCount, 1);
+  assert.equal(
+    client.texts.some((item) => item.text.includes("相同指令已在执行或排队")),
+    true
+  );
+
+  runner.pending[0].resolve({
+    finalMessage: "done",
+    sessionId: "thread_dup_task"
   });
   await waitFor(() => bridge.running.size === 0);
 });

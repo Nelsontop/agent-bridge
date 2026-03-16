@@ -25,6 +25,7 @@ const DEFAULTS = {
   contextMemoryLoadFraction: 0.1,
   contextWindowFallbackTokens: 128000,
   enableHealthServer: true,
+  duplicateTaskWindowMs: 15000,
   feishuInteractiveCardsEnabled: true,
   feishuReplyToMessageEnabled: true,
   feishuRequestRetries: 2,
@@ -245,6 +246,10 @@ export function loadConfig(rootDir = process.cwd()) {
     enableHealthServer: asBoolean(
       process.env.ENABLE_HEALTH_SERVER,
       DEFAULTS.enableHealthServer
+    ),
+    duplicateTaskWindowMs: Math.max(
+      0,
+      asNumber(process.env.DUPLICATE_TASK_WINDOW_MS, DEFAULTS.duplicateTaskWindowMs)
     ),
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
