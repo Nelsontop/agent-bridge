@@ -1,8 +1,18 @@
 import { spawn, spawnSync } from "node:child_process";
 import readline from "node:readline";
 
-function buildPrompt(prelude, userText) {
-  return `${prelude.trim()}\n\n用户消息：\n${userText.trim()}`;
+function buildPrompt(prelude, userText, { includePrelude = true } = {}) {
+  const normalizedUserText = String(userText || "").trim();
+  if (!includePrelude) {
+    return normalizedUserText;
+  }
+
+  const normalizedPrelude = String(prelude || "").trim();
+  if (!normalizedPrelude) {
+    return normalizedUserText;
+  }
+
+  return `${normalizedPrelude}\n\n用户消息：\n${normalizedUserText}`;
 }
 
 function buildArgs(config, prompt, sessionId, workspaceDir) {
@@ -50,7 +60,9 @@ function buildArgs(config, prompt, sessionId, workspaceDir) {
 }
 
 export function runCodexTask(config, { prompt, sessionId, onEvent, workspaceDir }) {
-  const fullPrompt = buildPrompt(config.codexPrelude, prompt);
+  const fullPrompt = buildPrompt(config.codexPrelude, prompt, {
+    includePrelude: !sessionId
+  });
   const resolvedWorkspaceDir = workspaceDir || config.codexWorkspaceDir;
   const args = buildArgs(config, fullPrompt, sessionId, resolvedWorkspaceDir);
   const [command, ...commandArgs] = config.codexCommand;

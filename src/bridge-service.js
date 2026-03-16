@@ -311,12 +311,16 @@ function formatPercent(value) {
 }
 
 function extractTokenUsage(event) {
-  const payload =
-    event?.type === "event_msg"
-      ? event.payload
-      : event?.type === "token_count"
-        ? event
-        : null;
+  const candidates = [
+    event,
+    event?.payload,
+    event?.payload?.payload,
+    event?.payload?.data,
+    event?.payload?.data?.payload,
+    event?.data,
+    event?.data?.payload
+  ].filter(Boolean);
+  const payload = candidates.find((candidate) => candidate?.type === "token_count") || null;
   if (payload?.type !== "token_count") {
     return null;
   }
@@ -540,6 +544,13 @@ export class BridgeService {
     this.rollbackAutoCommitWorkspace =
       dependencies.rollbackAutoCommitWorkspace || defaultRollbackAutoCommitWorkspace;
     this.metrics = {
+      lastCompactionDecision: "",
+      lastCompactionTaskId: "",
+      lastCompactionUpdatedAt: "",
+      lastContextTaskId: "",
+      lastContextUpdatedAt: "",
+      lastContextUsageRatio: 0,
+      lastModelContextWindow: 0,
       contextCompactionCount: 0,
       duplicateEventCount: 0,
       queuedCancelCount: 0,
@@ -804,11 +815,20 @@ export class BridgeService {
 
   async compactConversationContext(task, sessionId) {
     if (!this.config.contextCompactEnabled || !sessionId) {
+      this.metrics.lastCompactionDecision = "skipped";
+      this.metrics.lastCompactionTaskId = task.id;
+      this.metrics.lastCompactionUpdatedAt = new Date().toISOString();
       return {
         performed: false
       };
     }
     if (task.contextUsageRatio < this.config.contextCompactThreshold) {
+      this.metrics.lastCompactionDecision = "below-threshold";
+      this.metrics.lastCompactionTaskId = task.id;
+      this.metrics.lastCompactionUpdatedAt = new Date().toISOString();
+      console.log(
+        `[task:${task.id}] 上下文占用 ${formatPercent(task.contextUsageRatio)}，低于压缩阈值 ${formatPercent(this.config.contextCompactThreshold)}`
+      );
       return {
         performed: false
       };
@@ -848,7 +868,13 @@ export class BridgeService {
     });
 
     task.lastProgressText = `上下文已压缩归档到 ${memoryFilePath}，后续任务会从记忆继续。`;
+    this.metrics.lastCompactionDecision = "performed";
+    this.metrics.lastCompactionTaskId = task.id;
+    this.metrics.lastCompactionUpdatedAt = new Date().toISOString();
     this.metrics.contextCompactionCount += 1;
+    console.log(
+      `[task:${task.id}] 上下文已在占用 ${formatPercent(task.contextUsageRatio)} 时压缩归档到 ${memoryFilePath}`
+    );
     return {
       memoryFilePath,
       performed: true
@@ -1544,6 +1570,13 @@ export class BridgeService {
         task.modelContextWindow || 0,
         tokenUsage.modelContextWindow
       );
+      this.metrics.lastContextTaskId = task.id;
+      this.metrics.lastContextUpdatedAt = new Date().toISOString();
+      this.metrics.lastContextUsageRatio = task.contextUsageRatio;
+      this.metrics.lastModelContextWindow = task.modelContextWindow;
+      console.log(
+        `[task:${task.id}] 上下文占用 ${formatPercent(task.contextUsageRatio)}（${tokenUsage.totalTokens}/${task.modelContextWindow}）`
+      );
       this.persistRuntime();
     }
 
@@ -1818,6 +1851,13 @@ export class BridgeService {
       interruptedTasks: this.interruptedTasks.length,
       contextCompactionCount: this.metrics.contextCompactionCount,
       duplicateEventCount: this.metrics.duplicateEventCount,
+      lastCompactionDecision: this.metrics.lastCompactionDecision,
+      lastCompactionTaskId: this.metrics.lastCompactionTaskId,
+      lastCompactionUpdatedAt: this.metrics.lastCompactionUpdatedAt,
+      lastContextTaskId: this.metrics.lastContextTaskId,
+      lastContextUpdatedAt: this.metrics.lastContextUpdatedAt,
+      lastContextUsageRatio: this.metrics.lastContextUsageRatio,
+      lastModelContextWindow: this.metrics.lastModelContextWindow,
       queuedCancelCount: this.metrics.queuedCancelCount,
       queuedTasks: this.queue.length,
       recoveredInterruptedCount: this.metrics.recoveredInterruptedCount,

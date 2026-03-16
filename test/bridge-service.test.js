@@ -1688,6 +1688,73 @@ test("loaded memory is trimmed to at most ten percent of the context budget", as
   assert.equal(calls[0].prompt.includes(largeMemory), false);
 });
 
+test("nested token_count event updates context usage and triggers compaction", async () => {
+  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-nested-"));
+  const calls = [];
+  const bridge = new BridgeService(
+    createConfig({
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.8,
+      contextMemoryDir: memoryDir
+    }),
+    createStore(),
+    createClient(),
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: (_config, args) => {
+        calls.push(args);
+
+        if (calls.length === 1) {
+          args.onEvent?.({
+            type: "event_msg",
+            payload: {
+              data: {
+                payload: {
+                  info: {
+                    model_context_window: 1000,
+                    total_token_usage: {
+                      total_tokens: 900
+                    }
+                  },
+                  type: "token_count"
+                }
+              }
+            }
+          });
+
+          return {
+            cancel() {},
+            result: Promise.resolve({
+              finalMessage: "first result",
+              sessionId: "thread_nested"
+            })
+          };
+        }
+
+        return {
+          cancel() {},
+          result: Promise.resolve({
+            finalMessage: "nested memory",
+            sessionId: "thread_nested"
+          })
+        };
+      }
+    }
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(payload);
+  await waitFor(() => bridge.running.size === 0 && calls.length >= 2);
+
+  const conversation = bridge.store.getConversation("p2p:oc_test_chat");
+  assert.equal(conversation.sessionId, "");
+  assert.equal(conversation.lastContextUsageRatio, 0.9);
+  assert.equal(conversation.lastModelContextWindow, 1000);
+  assert.equal(bridge.getHealth().lastContextTaskId, "T001");
+  assert.equal(bridge.getHealth().lastContextUsageRatio, 0.9);
+  assert.equal(bridge.getHealth().lastCompactionDecision, "performed");
+});
+
 test("task title summary extracts intent instead of truncating raw text", async () => {
   const client = createClient();
   const runner = createRunnerController();

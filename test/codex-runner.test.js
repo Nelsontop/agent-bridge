@@ -119,3 +119,52 @@ test("runCodexTask cancel terminates descendants even if they escape the parent 
     }
   }
 });
+
+test("runCodexTask includes prelude only for fresh sessions", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-prompt-"));
+  const scriptPath = path.join(tempDir, "echo-args.mjs");
+
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "const args = process.argv.slice(2);",
+      "console.log(JSON.stringify({ type: \"thread.started\", thread_id: \"thread_test\" }));",
+      "console.log(JSON.stringify({",
+      "  type: \"item.completed\",",
+      "  item: {",
+      "    type: \"agent_message\",",
+      "    text: args[args.length - 1]",
+      "  }",
+      "}));"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const config = {
+    codexAdditionalArgs: [],
+    codexApprovalPolicy: "",
+    codexCommand: [process.execPath, scriptPath],
+    codexModel: "",
+    codexPrelude: "bridge prelude",
+    codexProfile: "",
+    codexSandbox: "",
+    codexSkipGitRepoCheck: false,
+    codexWorkspaceDir: tempDir
+  };
+
+  const freshRunner = runCodexTask(config, {
+    prompt: "fresh task",
+    sessionId: null,
+    workspaceDir: tempDir
+  });
+  const freshResult = await freshRunner.result;
+  assert.equal(freshResult.finalMessage, "bridge prelude\n\n用户消息：\nfresh task");
+
+  const resumedRunner = runCodexTask(config, {
+    prompt: "resume task",
+    sessionId: "thread_existing",
+    workspaceDir: tempDir
+  });
+  const resumedResult = await resumedRunner.result;
+  assert.equal(resumedResult.finalMessage, "resume task");
+});
