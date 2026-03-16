@@ -69,22 +69,24 @@ export class TaskRuntime {
     this.running = new Map();
 
     const runtime = this.store.getRuntimeSnapshot();
-    this.nextTaskNumber = runtime.nextTaskNumber || 1;
+    this.nextTaskNumbers = { ...(runtime.nextTaskNumbers || {}) };
     this.queue = (runtime.queue || []).map((task) => restoreTask(task));
     this.interruptedTasks = (runtime.interrupted || []).map((task) => restoreTask(task));
     this.persist();
   }
 
-  createTaskId() {
-    const id = `T${String(this.nextTaskNumber).padStart(3, "0")}`;
-    this.nextTaskNumber += 1;
+  createTaskId(chatKey) {
+    const normalizedChatKey = String(chatKey || "").trim();
+    const nextNumber = Math.max(1, Number(this.nextTaskNumbers[normalizedChatKey]) || 1);
+    const id = `T${String(nextNumber).padStart(3, "0")}`;
+    this.nextTaskNumbers[normalizedChatKey] = nextNumber + 1;
     return id;
   }
 
   persist() {
     this.store.saveRuntimeSnapshot({
       interrupted: this.interruptedTasks.map((task) => sanitizeTaskSnapshot(task)),
-      nextTaskNumber: this.nextTaskNumber,
+      nextTaskNumbers: this.nextTaskNumbers,
       queue: this.queue.map((task) => sanitizeTaskSnapshot(task)),
       running: [...this.running.values()].map((task) => sanitizeTaskSnapshot(task))
     });

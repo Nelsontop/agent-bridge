@@ -4,11 +4,11 @@ import path from "node:path";
 const MAX_INTERRUPTED_TASKS = 50;
 
 const EMPTY_STATE = {
-  version: 2,
+  version: 3,
   conversations: {},
   runtime: {
     interrupted: [],
-    nextTaskNumber: 1,
+    nextTaskNumbers: {},
     queue: [],
     running: []
   }
@@ -26,7 +26,6 @@ function normalizeTaskList(value) {
 }
 
 function normalizeRuntime(runtime, recoveredAt) {
-  const nextTaskNumber = Math.max(1, Number(runtime?.nextTaskNumber) || 1);
   const queue = normalizeTaskList(runtime?.queue);
   const running = normalizeTaskList(runtime?.running);
   const interrupted = [
@@ -39,10 +38,29 @@ function normalizeRuntime(runtime, recoveredAt) {
       status: "interrupted"
     }))
   ].slice(-MAX_INTERRUPTED_TASKS);
+  const nextTaskNumbers = {};
+  const snapshots = [...interrupted, ...queue, ...running];
+
+  for (const task of snapshots) {
+    const chatKey = String(task?.chatKey || "").trim();
+    const taskId = String(task?.id || "");
+    const match = taskId.match(/^T(\d+)$/);
+    if (!chatKey || !match) {
+      continue;
+    }
+
+    const candidate = Number(match[1]) + 1;
+    nextTaskNumbers[chatKey] = Math.max(nextTaskNumbers[chatKey] || 1, candidate);
+  }
+
+  for (const [chatKey, value] of Object.entries(runtime?.nextTaskNumbers || {})) {
+    const normalizedValue = Math.max(1, Number(value) || 1);
+    nextTaskNumbers[chatKey] = Math.max(nextTaskNumbers[chatKey] || 1, normalizedValue);
+  }
 
   return {
     interrupted,
-    nextTaskNumber,
+    nextTaskNumbers,
     queue,
     running: []
   };
@@ -68,11 +86,11 @@ export class StateStore {
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
       const recoveredAt = new Date().toISOString();
       this.state = {
-        version: 2,
+        version: 3,
         conversations: parsed.conversations || {},
         runtime: normalizeRuntime(parsed.runtime, recoveredAt)
       };
-      if (parsed.version !== 2 || normalizeTaskList(parsed.runtime?.running).length > 0) {
+      if (parsed.version !== 3 || normalizeTaskList(parsed.runtime?.running).length > 0) {
         this.save();
       }
     } catch (error) {

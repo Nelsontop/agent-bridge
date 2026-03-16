@@ -107,7 +107,7 @@ function createStore({ conversations = {}, runtime } = {}) {
     runtime: structuredClone(
       runtime || {
         interrupted: [],
-        nextTaskNumber: 1,
+        nextTaskNumbers: {},
         queue: [],
         running: []
       }

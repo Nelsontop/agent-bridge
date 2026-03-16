@@ -600,7 +600,7 @@ export class BridgeService {
       contextUsageRatio: 0,
       enqueuedAt: new Date().toISOString(),
       finalMessage: "",
-      id: this.runtime.createTaskId(),
+      id: this.runtime.createTaskId(chatKey),
       lastErrorMessage: "",
       lastProgressText: "",
       lastStreamSentAt: 0,
