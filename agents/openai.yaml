@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Feishu Bridge"
+  short_description: "Run and debug the Feishu bridge"
+  default_prompt: "Use $codex-feishu-bridge to set up, operate, or troubleshoot this Feishu-to-Codex bridge."
