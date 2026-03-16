@@ -40,6 +40,7 @@ export class BridgeCommandRouter {
       lastContextUsageRatio: 0,
       lastModelContextWindow: 0,
       memoryFilePath: "",
+      pendingInteraction: null,
       repoName: result.repoName,
       repoRemoteStatus: result.remoteStatus,
       repoRemoteUrl: result.remoteUrl || "",
@@ -118,7 +119,7 @@ export class BridgeCommandRouter {
 
     if (
       this.bridge.requiresWorkspaceBinding(chatKey, chatId) &&
-      !["/bind", "/help", "/reset", "/status"].includes(command)
+      !["/bind", "/choose", "/help", "/reset", "/status"].includes(command)
     ) {
       await this.bridge.sendWorkspaceBindingPrompt(target, chatKey, chatId);
       return;
@@ -148,6 +149,7 @@ export class BridgeCommandRouter {
           lastContextUsageRatio: 0,
           lastModelContextWindow: 0,
           memoryFilePath: "",
+          pendingInteraction: null,
           sessionId: ""
         });
       } else {
@@ -186,6 +188,7 @@ export class BridgeCommandRouter {
         `repo: ${conversation?.repoRemoteUrl || "无"}`,
         `sessionId: ${conversation?.sessionId || "无"}`,
         `memoryFile: ${conversation?.memoryFilePath || "无"}`,
+        `pendingInteraction: ${conversation?.pendingInteraction?.question || "无"}`,
         `running: ${runningTask ? `${this.helpers.buildTaskName(runningTask)} (${runningTask.startedAt})` : "无"}`,
         `queued: ${queuedTasks.map((task) => this.helpers.buildTaskName(task)).join(", ") || "无"}`,
         `interrupted: ${interruptedCount}`
@@ -228,6 +231,18 @@ export class BridgeCommandRouter {
         silentSuccess,
         target,
         taskReference
+      });
+      return;
+    }
+
+    if (command === "/choose") {
+      const optionId = rest[0] || "";
+      await this.bridge.choosePendingInteraction({
+        chatId,
+        chatKey,
+        optionId,
+        silentSuccess,
+        target
       });
       return;
     }

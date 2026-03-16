@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
 import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "./workspace-binding.js";
 import { BridgeCommandRouter } from "./bridge-command-router.js";
@@ -16,6 +17,8 @@ function sleep(ms) {
 
 const RECENT_EVENT_TTL_MS = 5 * 60 * 1000;
 const MAX_RECENT_EVENTS = 500;
+const MAX_INTERACTION_OPTIONS = 3;
+const INTERACTION_BLOCK_PATTERN = /```codex_bridge_interaction\s*([\s\S]*?)```/i;
 
 function chatKeyFor(event) {
   return `${event.message.chat_type}:${event.message.chat_id}`;
@@ -217,6 +220,7 @@ function helpText() {
     "/bind <目录> [仓库名] 绑定当前群组工作目录并初始化 GitHub 公共仓库",
     "/status 查看当前会话、工作目录与任务状态",
     "/reset 清空当前聊天绑定的 Codex 会话，不影响工作目录绑定",
+    "/choose <选项ID> 选择当前等待确认的卡片选项",
     "/retry [任务号] 重试当前聊天中最近的中断任务，或指定中断任务",
     "/abort <任务号> 终止运行中的任务，或取消排队中的任务",
     "",
@@ -291,6 +295,67 @@ function buildReplyTarget(config, event) {
   };
 }
 
+function normalizeInteractionOptionId(value, index) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "");
+  return normalized || `option-${index + 1}`;
+}
+
+function parseInteractionRequest(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const match = raw.match(INTERACTION_BLOCK_PATTERN);
+  if (!match) {
+    return null;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(match[1].trim());
+  } catch (error) {
+    return {
+      error: `交互 JSON 解析失败：${error.message || String(error)}`
+    };
+  }
+
+  const question = String(parsed?.question || "").trim();
+  const rawOptions = Array.isArray(parsed?.options) ? parsed.options.slice(0, MAX_INTERACTION_OPTIONS) : [];
+  const options = rawOptions
+    .map((option, index) => ({
+      id: normalizeInteractionOptionId(option?.id, index),
+      label: truncateText(option?.label || option?.title || `选项${index + 1}`, 20),
+      prompt: String(option?.prompt || "").trim(),
+      style: ["primary", "default", "danger"].includes(option?.style)
+        ? option.style
+        : index === 0
+          ? "primary"
+          : "default"
+    }))
+    .filter((option) => option.label && option.prompt);
+
+  if (!question) {
+    return {
+      error: "交互请求缺少 question。"
+    };
+  }
+  if (options.length < 2) {
+    return {
+      error: "交互请求至少需要两个有效选项。"
+    };
+  }
+
+  return {
+    cleanedText: raw.replace(INTERACTION_BLOCK_PATTERN, "").trim(),
+    question,
+    options
+  };
+}
+
 function buildCardButton(text, type, value) {
   return {
     tag: "button",
@@ -354,7 +419,9 @@ function extractCardAction(eventEnvelope) {
   return {
     chatId: value.chatId || value.chat_id || "",
     chatKey: value.chatKey || value.chat_key || "",
+    interactionId: value.interactionId || value.interaction_id || "",
     name: value.action,
+    optionId: value.optionId || value.option_id || "",
     replyToMessageId:
       value.replyToMessageId ||
       value.reply_to_message_id ||
@@ -457,6 +524,186 @@ export class BridgeService {
       "绑定时会在本地初始化 Git 仓库，并尝试通过已登录的 `gh` CLI 创建 GitHub 公共仓库；若已存在 `origin` 远端则跳过远端创建。",
       "可先发送 `/status` 查看当前状态。"
     ].join("\n");
+  }
+
+  getPendingInteraction(chatKey) {
+    return this.store.getConversation(chatKey)?.pendingInteraction || null;
+  }
+
+  clearPendingInteraction(chatKey) {
+    const conversation = this.store.getConversation(chatKey);
+    if (!conversation?.pendingInteraction) {
+      return;
+    }
+    this.store.upsertConversation(chatKey, {
+      pendingInteraction: null
+    });
+  }
+
+  buildInteractionCard(interaction, taskName = "") {
+    const lines = [
+      taskName ? `**来源任务**：\`${taskName}\`` : "",
+      `**需要选择**：${interaction.question}`,
+      `**可选项**：${interaction.options.map((option) => `\`${option.id}\` ${option.label}`).join(" / ")}`,
+      interaction.selectedOptionId
+        ? `**当前状态**：已选择 \`${interaction.selectedOptionId}\`，正在继续执行。`
+        : `**当前状态**：等待用户选择`
+    ].filter(Boolean);
+
+    const actions = interaction.selectedOptionId
+      ? []
+      : interaction.options.map((option) =>
+          buildCardButton(option.label, option.style, {
+            action: "choose",
+            chatId: interaction.chatId,
+            chatKey: interaction.chatKey,
+            interactionId: interaction.id,
+            optionId: option.id,
+            replyToMessageId: interaction.replyToMessageId
+          })
+        );
+
+    const elements = [
+      {
+        tag: "div",
+        text: {
+          content: lines.join("\n"),
+          tag: "lark_md"
+        }
+      }
+    ];
+    if (actions.length > 0) {
+      elements.push({
+        actions,
+        tag: "action"
+      });
+    }
+
+    return {
+      config: {
+        update_multi: true,
+        wide_screen_mode: true
+      },
+      elements,
+      header: {
+        template: interaction.selectedOptionId ? "green" : "orange",
+        title: {
+          content: taskName ? `${taskName} 等待选择` : "等待选择",
+          tag: "plain_text"
+        }
+      }
+    };
+  }
+
+  async syncInteractionCard(interaction, taskName = "") {
+    if (!this.config.feishuInteractiveCardsEnabled || !interaction?.chatId) {
+      return null;
+    }
+
+    const card = this.buildInteractionCard(interaction, taskName);
+    if (interaction.cardMessageId) {
+      try {
+        await this.feishuClient.updateCard(interaction.cardMessageId, card);
+        return interaction.cardMessageId;
+      } catch (error) {
+        console.error(`[interaction:${interaction.id}] update card failed:`, error);
+      }
+    }
+
+    const payload = await this.safeSendCard(
+      {
+        chatId: interaction.chatId,
+        replyToMessageId: interaction.replyToMessageId
+      },
+      card
+    );
+    const messageId = payload?.data?.message_id || payload?.data?.message?.message_id || "";
+    return messageId || "";
+  }
+
+  async registerPendingInteraction(task, result, interactionRequest) {
+    const interaction = {
+      id: crypto.randomUUID(),
+      chatId: task.target.chatId,
+      chatKey: task.chatKey,
+      createdAt: new Date().toISOString(),
+      options: interactionRequest.options,
+      question: interactionRequest.question,
+      replyToMessageId: task.target.replyToMessageId || "",
+      senderOpenId: task.senderOpenId,
+      selectedOptionId: "",
+      sessionId: result.sessionId || task.sessionId || "",
+      sourceTaskId: task.id,
+      sourceTaskName: buildTaskName(task),
+      workspaceDir: task.workspaceDir
+    };
+
+    const conversation = this.store.getConversation(task.chatKey);
+    if (conversation?.pendingInteraction?.cardMessageId) {
+      interaction.cardMessageId = conversation.pendingInteraction.cardMessageId;
+    } else if (task.cardMessageId) {
+      interaction.cardMessageId = task.cardMessageId;
+    } else {
+      interaction.cardMessageId = "";
+    }
+
+    this.store.upsertConversation(task.chatKey, {
+      lastContextUsageRatio: task.contextUsageRatio,
+      lastModelContextWindow: task.modelContextWindow || 0,
+      lastSenderOpenId: task.senderOpenId,
+      lastTaskId: task.id,
+      pendingInteraction: interaction,
+      sessionId: result.sessionId || "",
+      workspaceDir: task.workspaceDir
+    });
+
+    const cardMessageId = await this.syncInteractionCard(interaction, buildTaskName(task));
+    if (cardMessageId && interaction.cardMessageId !== cardMessageId) {
+      interaction.cardMessageId = cardMessageId;
+      this.store.upsertConversation(task.chatKey, {
+        pendingInteraction: interaction
+      });
+    }
+
+    return interaction;
+  }
+
+  createTaskForChat({
+    chatId,
+    chatKey,
+    nameSummary = "",
+    prompt,
+    senderOpenId = "",
+    sessionId = "",
+    target,
+    workspaceDir
+  }) {
+    return {
+      autoCommitSummary: "",
+      abortRequested: false,
+      cardMessageId: "",
+      chatKey,
+      completedCommandIds: new Set(),
+      contextUsageRatio: 0,
+      enqueuedAt: new Date().toISOString(),
+      finalMessage: "",
+      id: this.runtime.createTaskId(),
+      lastErrorMessage: "",
+      lastProgressText: "",
+      lastStreamSentAt: 0,
+      modelContextWindow: 0,
+      nameSummary: nameSummary || summarizeTaskPrompt(prompt),
+      prompt,
+      recovered: false,
+      senderOpenId,
+      sessionId,
+      startedAt: "",
+      startedCommandIds: new Set(),
+      status: "queued",
+      streamChain: Promise.resolve(),
+      target,
+      workspaceDir
+    };
   }
 
   async sendWorkspaceBindingPrompt(target, chatKey, chatId) {
@@ -715,6 +962,8 @@ export class BridgeService {
       "card",
       action.name || "",
       action.taskId || "",
+      action.interactionId || "",
+      action.optionId || "",
       action.replyToMessageId || "",
       action.senderOpenId || ""
     ].join(":");
@@ -908,6 +1157,31 @@ export class BridgeService {
       return;
     }
 
+    if (action.name === "choose") {
+      const interaction = this.getPendingInteraction(action.chatKey);
+      if (!interaction || interaction.id !== action.interactionId) {
+        await this.safeSend(
+          {
+            chatId: action.chatId,
+            replyToMessageId: action.replyToMessageId
+          },
+          "这个选择卡片已失效，请让 Codex 重新发起一次选择。"
+        );
+        return;
+      }
+      await this.choosePendingInteraction({
+        chatId: action.chatId,
+        chatKey: action.chatKey,
+        optionId: action.optionId,
+        silentSuccess: true,
+        target: {
+          chatId: action.chatId,
+          replyToMessageId: action.replyToMessageId
+        }
+      });
+      return;
+    }
+
     if (action.name === "reset") {
       await this.handleCommand({
         chatId: action.chatId,
@@ -937,35 +1211,18 @@ export class BridgeService {
 
   createTask(event, prompt, senderOpenId, target) {
     const chatKey = chatKeyFor(event);
-    return {
-      autoCommitSummary: "",
-      abortRequested: false,
-      cardMessageId: "",
+    return this.createTaskForChat({
+      chatId: event.message.chat_id,
       chatKey,
-      completedCommandIds: new Set(),
-      contextUsageRatio: 0,
-      enqueuedAt: new Date().toISOString(),
-      finalMessage: "",
-      id: this.runtime.createTaskId(),
-      lastErrorMessage: "",
-      lastProgressText: "",
-      lastStreamSentAt: 0,
-      modelContextWindow: 0,
-      nameSummary: summarizeTaskPrompt(prompt),
       prompt,
-      recovered: false,
       senderOpenId,
-      sessionId: "",
-      startedAt: "",
-      startedCommandIds: new Set(),
-      status: "queued",
-      streamChain: Promise.resolve(),
       target,
       workspaceDir: this.resolveWorkspaceDir(chatKey, event.message.chat_id)
-    };
+    });
   }
 
   enqueueTask(event, prompt, senderOpenId, target) {
+    this.clearPendingInteraction(chatKeyFor(event));
     const task = this.createTask(event, prompt, senderOpenId, target);
     return this.runtime.enqueue(task);
   }
@@ -990,6 +1247,90 @@ export class BridgeService {
       target,
       silentSuccess
     });
+  }
+
+  async choosePendingInteraction({
+    chatId,
+    chatKey,
+    optionId,
+    target,
+    silentSuccess = false
+  }) {
+    const normalizedOptionId = String(optionId || "").trim().toLowerCase();
+    const interaction = this.getPendingInteraction(chatKey);
+    if (!interaction) {
+      await this.safeSend(target, "当前聊天没有等待选择的交互。");
+      return;
+    }
+    if (!normalizedOptionId) {
+      await this.safeSend(
+        target,
+        `用法：/choose <选项ID>\n可选项：${interaction.options.map((option) => option.id).join(", ")}`
+      );
+      return;
+    }
+
+    const option = interaction.options.find((item) => item.id === normalizedOptionId);
+    if (!option) {
+      await this.safeSend(
+        target,
+        `无效选项 ${normalizedOptionId}。可选项：${interaction.options.map((item) => item.id).join(", ")}`
+      );
+      return;
+    }
+
+    const pendingForChat = this.countPendingTasksForChat(chatKey);
+    if (pendingForChat >= this.config.maxQueuedTasksPerChat) {
+      this.metrics.rejectedByChatLimit += 1;
+      await this.safeSend(
+        target,
+        `当前聊天待处理任务已达上限（${this.config.maxQueuedTasksPerChat}）。请等待已有任务完成，或用 /abort <任务号> 取消排队任务。`
+      );
+      return;
+    }
+
+    const pendingForUser = this.countPendingTasksForUser(interaction.senderOpenId, chatKey);
+    if (pendingForUser >= this.config.maxQueuedTasksPerUser) {
+      this.metrics.rejectedByUserLimit += 1;
+      await this.safeSend(
+        target,
+        `当前聊天内该用户待处理任务已达上限（${this.config.maxQueuedTasksPerUser}）。请等待已有任务完成，或取消排队中的任务。`
+      );
+      return;
+    }
+
+    const resolvedWorkspaceDir = interaction.workspaceDir || this.resolveWorkspaceDir(chatKey, chatId);
+    const followUpTask = this.createTaskForChat({
+      chatId,
+      chatKey,
+      nameSummary: `继续${option.label}`,
+      prompt: option.prompt,
+      senderOpenId: interaction.senderOpenId || "",
+      sessionId: interaction.sessionId || "",
+      target,
+      workspaceDir: resolvedWorkspaceDir
+    });
+    followUpTask.lastProgressText = `已选择 ${option.label}，等待继续执行。`;
+
+    interaction.selectedOptionId = option.id;
+    await this.syncInteractionCard(interaction, interaction.sourceTaskName);
+    this.store.upsertConversation(chatKey, {
+      pendingInteraction: null
+    });
+
+    this.runtime.enqueue(followUpTask);
+    if (this.config.taskAckEnabled) {
+      await this.sendTaskAck(followUpTask);
+    }
+    await this.refreshQueuedTaskCards();
+    this.pumpQueue();
+
+    if (!silentSuccess) {
+      await this.safeSend(
+        target,
+        `已选择 ${option.label}，继续任务 ${buildTaskName(followUpTask)}。`
+      );
+    }
   }
 
   buildTaskCard(task) {
@@ -1385,13 +1726,47 @@ export class BridgeService {
       const result = await runner.result;
       await task.streamChain;
       this.ensureTaskNotAborted(task);
-      markTaskCompleted(task, result);
+      const interactionRequest = parseInteractionRequest(result.finalMessage);
+      if (interactionRequest?.error) {
+        throw new Error(interactionRequest.error);
+      }
+
+      const normalizedResult = {
+        ...result,
+        finalMessage:
+          interactionRequest?.cleanedText ||
+          (interactionRequest ? `需要用户选择：${interactionRequest.question}` : result.finalMessage)
+      };
+      markTaskCompleted(task, normalizedResult);
+
+      if (interactionRequest) {
+        const interaction = await this.registerPendingInteraction(
+          task,
+          normalizedResult,
+          interactionRequest
+        );
+        task.finalMessage = `需要用户选择：${interaction.question}`;
+        if (!this.config.feishuInteractiveCardsEnabled) {
+          const text = [
+            `任务 ${buildTaskName(task)} 需要你做选择：`,
+            interaction.question,
+            "",
+            ...interaction.options.map(
+              (option) => `- ${option.id}: ${option.label}\n  /choose ${option.id}`
+            )
+          ].join("\n");
+          await this.safeSend(task.target, text);
+        }
+        return;
+      }
+
       this.store.upsertConversation(task.chatKey, {
         lastContextUsageRatio: task.contextUsageRatio,
         lastModelContextWindow: task.modelContextWindow || 0,
         memoryFilePath: conversation?.memoryFilePath || "",
         lastSenderOpenId: task.senderOpenId,
         lastTaskId: task.id,
+        pendingInteraction: null,
         sessionId: result.sessionId,
         workspaceDir: task.workspaceDir
       });
