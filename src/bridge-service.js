@@ -236,6 +236,76 @@ function truncateText(text, maxChars) {
   return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
+const COMMAND_PROGRESS_RULES = [
+  { pattern: /\b(rg|grep|find)\b/, label: "正在搜索项目内容" },
+  { pattern: /\b(sed|cat|head|tail|less)\b/, label: "正在查看文件内容" },
+  { pattern: /\bgit\s+status\b/, label: "正在检查 Git 状态" },
+  { pattern: /\bgit\s+diff\b/, label: "正在检查代码改动" },
+  { pattern: /\bgit\b/, label: "正在执行 Git 操作" },
+  { pattern: /\b(node\s+--test|npm\s+test|pnpm\s+test|yarn\s+test|pytest|jest|vitest)\b/, label: "正在运行测试" },
+  { pattern: /\b(npm\s+install|pnpm\s+install|yarn\s+install)\b/, label: "正在安装或检查依赖" },
+  { pattern: /\b(curl|wget)\b/, label: "正在检查远程接口" },
+  { pattern: /\b(ps|lsof|ss|netstat)\b/, label: "正在检查运行状态" }
+];
+
+function extractCommandSubject(command) {
+  const normalized = String(command || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const fileMatch = normalized.match(
+    /([A-Za-z0-9_./-]+\.(?:js|ts|tsx|jsx|md|json|yaml|yml|toml|env|sh))(?![A-Za-z0-9_./-])/
+  );
+  if (fileMatch) {
+    return fileMatch[1];
+  }
+
+  if (normalized.includes(".env")) {
+    return ".env";
+  }
+
+  const pathMatch = normalized.match(/(src\/[A-Za-z0-9_./-]+|test\/[A-Za-z0-9_./-]+)/);
+  return pathMatch ? pathMatch[1] : "";
+}
+
+function summarizeCommandProgress(command, eventType, output, maxChars) {
+  const normalized = String(command || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  const matchedRule =
+    COMMAND_PROGRESS_RULES.find((rule) => rule.pattern.test(normalized)) || null;
+  const subject = extractCommandSubject(normalized);
+
+  if (eventType === "item.started") {
+    if (matchedRule?.label && subject) {
+      return `${matchedRule.label}：${subject}`;
+    }
+    if (matchedRule?.label) {
+      return matchedRule.label;
+    }
+    return `正在执行命令：${truncateText(normalized, maxChars)}`;
+  }
+
+  const outputText = truncateText(output, Math.max(120, maxChars - 40));
+  if (matchedRule?.label && outputText) {
+    return `${matchedRule.label}，已完成。\n${outputText}`;
+  }
+  if (matchedRule?.label) {
+    return `${matchedRule.label}，已完成。`;
+  }
+  return `命令已完成：${truncateText(normalized, maxChars)}`;
+}
+
+function normalizeAgentProgressText(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function formatPercent(value) {
   return `${Math.round(value * 100)}%`;
 }
@@ -1483,12 +1553,12 @@ export class BridgeService {
 
     const { item } = event;
     if (item.type === "agent_message" && event.type === "item.completed") {
-      const text = String(item.text || "").trim();
+      const text = normalizeAgentProgressText(item.text);
       if (!text || text === task.lastProgressText) {
         return;
       }
 
-      this.queueStreamText(task, `任务 ${buildTaskName(task)} 进度更新：\n\n${text}`);
+      this.queueStreamText(task, text);
       return;
     }
 
@@ -1501,10 +1571,12 @@ export class BridgeService {
         return;
       }
       task.startedCommandIds.add(item.id);
-      this.queueStreamText(
-        task,
-        `任务 ${buildTaskName(task)} 正在执行命令：\n${truncateText(item.command, this.config.maxReplyChars)}`
-      );
+      this.queueStreamText(task, summarizeCommandProgress(
+        item.command,
+        event.type,
+        "",
+        this.config.maxReplyChars
+      ));
       return;
     }
 
@@ -1514,22 +1586,18 @@ export class BridgeService {
       }
       task.completedCommandIds.add(item.id);
 
-      const output = truncateText(
-        item.aggregated_output,
-        Math.max(200, this.config.maxReplyChars - 120)
-      );
-      const lines = [
-        `任务 ${buildTaskName(task)} 命令${item.exit_code === 0 ? "已完成" : "结束"}：`,
-        truncateText(item.command, this.config.maxReplyChars)
-      ];
-      if (item.exit_code !== null && item.exit_code !== undefined) {
-        lines.push(`exit: ${item.exit_code}`);
-      }
-      if (output) {
-        lines.push("", output);
-      }
-
-      this.queueStreamText(task, lines.join("\n"));
+      const output = item.exit_code === 0 ? item.aggregated_output : [
+        item.exit_code !== null && item.exit_code !== undefined ? `exit: ${item.exit_code}` : "",
+        item.aggregated_output || ""
+      ]
+        .filter(Boolean)
+        .join("\n");
+      this.queueStreamText(task, summarizeCommandProgress(
+        item.command,
+        event.type,
+        output,
+        this.config.maxReplyChars
+      ));
     }
   }
 

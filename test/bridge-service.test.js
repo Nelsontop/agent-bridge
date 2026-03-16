@@ -844,6 +844,76 @@ test("flattened WS message event creates a task and resumes the existing session
   assert.equal(store.getConversation("p2p:oc_test_chat").sessionId, "thread_new");
 });
 
+test("streaming agent messages are shown as user-facing progress text", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig(),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  assert.equal(runner.calls.length, 1);
+
+  runner.pending[0].emit({
+    type: "item.completed",
+    item: {
+      id: "item_agent_progress",
+      type: "agent_message",
+      text: "正在检查流式配置，并准备给出结论。"
+    }
+  });
+
+  await waitFor(() =>
+    client.cardUpdates.some((update) =>
+      update.card.elements[0].text.content.includes("正在检查流式配置，并准备给出结论。")
+    )
+  );
+});
+
+test("streaming command updates are summarized instead of showing raw shell", async () => {
+  const client = createClient();
+  const runner = createRunnerController();
+  const bridge = new BridgeService(
+    createConfig(),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: runner.runCodexTask.bind(runner)
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  assert.equal(runner.calls.length, 1);
+
+  runner.pending[0].emit({
+    type: "item.started",
+    item: {
+      id: "item_command_progress",
+      type: "command_execution",
+      command: "/bin/bash -lc \"sed -n '1,160p' src/bridge-service.js\""
+    }
+  });
+
+  await waitFor(() =>
+    client.cardUpdates.some((update) =>
+      update.card.elements[0].text.content.includes("正在查看文件内容：src/bridge-service.js")
+    )
+  );
+  assert.equal(
+    client.cardUpdates.some((update) =>
+      update.card.elements[0].text.content.includes("/bin/bash -lc")
+    ),
+    false
+  );
+});
+
 test("interaction request persists pending choice and /choose resumes the same session", async () => {
   const client = createClient();
   const runner = createRunnerController();
