@@ -20,7 +20,7 @@
 - `/bind` 只能绑定到 `WORKSPACE_ALLOWED_ROOTS` 允许的目录范围内
 - 绑定时自动准备本地 Git 仓库，并尝试通过已登录的 `gh` CLI 创建 GitHub 公共仓库
 - 任务过程通过飞书共享卡片持续更新，支持 `/abort`、`/retry`、`/reset`
-- 当 Codex 需要你做方案选择时，可直接点击飞书卡片按钮继续，选择状态会持久化，不依赖模型临时上下文
+- 当 Codex 需要你做方案选择时，Bridge 会持久化选项并提示你使用 `/choose <选项ID>` 继续
 - 本地持久化聊天状态、排队任务、上下文记忆和重启恢复信息
 - 可选任务完成后自动 Git 提交
 
@@ -56,8 +56,7 @@ npm run setup
 1. 机器人能力
 2. 事件 `im.message.receive_v1`
 3. 事件 `im.chat.member.bot.added_v1`
-4. 卡片按钮回调事件
-5. 订阅方式选择“使用长连接接收事件/回调”
+4. 订阅方式选择“使用长连接接收事件/回调”
 
 ### 4. 启动服务
 
@@ -251,21 +250,20 @@ sequenceDiagram
 - 支持 `/retry [任务号]`
 - 支持 `/reset`
 - 支持 `/status`
-- 支持 `/choose <选项ID>` 作为卡片按钮失效时的兜底选择命令
+- 支持 `/choose <选项ID>` 继续等待用户选择的任务
 
 ### 结果回传
 
 - 支持共享卡片持续更新任务状态
 - 支持命令执行过程流式回传
 - 支持任务完成后回写结果摘要
-- 支持通过 `codex_bridge_interaction` 协议把“需要用户选择”的场景转成飞书卡片按钮
+- 支持通过 `codex_bridge_interaction` 协议把“需要用户选择”的场景转成文本选择指令
 
 ### 选择交互
 
 - 当 Codex 判断需要你确认方案时，会输出一个 `codex_bridge_interaction` JSON 代码块
-- Bridge 会把它转成飞书卡片按钮，并把问题、选项、session、工作目录一起持久化
-- 你点击按钮后，Bridge 不会把“我选了 B”交给模型猜，而是直接用预存的后续 prompt 继续当前 session
-- 如果卡片已失效，仍可用 `/choose <选项ID>` 手动继续
+- Bridge 会把问题、选项、session、工作目录一起持久化，并发送 `/choose <选项ID>` 提示
+- 你用 `/choose` 后，Bridge 不会把“我选了 B”交给模型猜，而是直接用预存的后续 prompt 继续当前 session
 
 ### 上下文管理
 
@@ -348,7 +346,6 @@ AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 4. 在“事件与回调”里添加：
    - `im.message.receive_v1`
    - `im.chat.member.bot.added_v1`
-   - 卡片按钮回调事件
 5. 把订阅方式切到“使用长连接接收事件/回调”
 6. 确保机器人能被私聊，或者能在群里被 `@`
 

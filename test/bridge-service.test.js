@@ -793,7 +793,8 @@ test("real message event creates a shared card and resumes the existing session"
 
   assert.equal(client.cards.length, 1);
   assert.equal(client.cards[0].card.header.title.content, "T001-检查项目状态");
-  assert.equal(client.cards[0].card.elements[0].text.content.includes("终止兜底"), false);
+  assert.equal(client.cards[0].card.elements[0].text.content.includes("/abort T001"), true);
+  assert.equal(client.cards[0].card.elements[0].text.content.includes("/reset"), true);
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0].sessionId, "thread_existing");
 
@@ -879,11 +880,10 @@ test("interaction request persists pending choice and /choose resumes the same s
     ["a", "b"]
   );
   assert.equal(
-    client.cardUpdates.some((update) =>
-      update.card.header.title.content.includes("等待选择")
-    ),
+    client.texts.at(-1).text.includes("/choose a"),
     true
   );
+  assert.equal(client.texts.at(-1).text.includes("/choose b"), true);
 
   await bridge.handleCommand({
     commandText: "/choose b",
@@ -903,66 +903,6 @@ test("interaction request persists pending choice and /choose resumes the same s
   runner.pending[1].resolve({
     finalMessage: "已按方案 B 完成",
     sessionId: "thread_interaction"
-  });
-  await waitFor(() => bridge.running.size === 0);
-});
-
-test("card choose action resumes a pending interaction without extra text reply", async () => {
-  const client = createClient();
-  const runner = createRunnerController();
-  const store = createStore();
-  const bridge = new BridgeService(
-    createConfig(),
-    store,
-    client,
-    {
-      autoCommitWorkspace: async () => ({ status: "disabled" }),
-      runCodexTask: runner.runCodexTask.bind(runner)
-    }
-  );
-
-  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
-  runner.pending[0].resolve({
-    finalMessage: createInteractionMessage(),
-    sessionId: "thread_interaction_card"
-  });
-  await waitFor(
-    () =>
-      bridge.running.size === 0 &&
-      Boolean(store.getConversation("p2p:oc_test_chat")?.pendingInteraction)
-  );
-
-  const interaction = store.getConversation("p2p:oc_test_chat").pendingInteraction;
-  const textCountBeforeChoose = client.texts.length;
-  await bridge.dispatchEvent({
-    event: {
-      action: {
-        value: {
-          action: "choose",
-          chatId: "oc_test_chat",
-          chatKey: "p2p:oc_test_chat",
-          interactionId: interaction.id,
-          optionId: "a",
-          replyToMessageId: "om_source_message_1"
-        }
-      },
-      operator: {
-        operator_id: {
-          open_id: "ou_user_a"
-        }
-      }
-    },
-    event_type: "card.action.trigger"
-  });
-
-  assert.equal(runner.calls.length, 2);
-  assert.equal(runner.calls[1].sessionId, "thread_interaction_card");
-  assert.equal(runner.calls[1].prompt, "继续按方案 A 执行");
-  assert.equal(client.texts.length, textCountBeforeChoose);
-
-  runner.pending[1].resolve({
-    finalMessage: "已按方案 A 完成",
-    sessionId: "thread_interaction_card"
   });
   await waitFor(() => bridge.running.size === 0);
 });

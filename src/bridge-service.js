@@ -540,85 +540,15 @@ export class BridgeService {
     });
   }
 
-  buildInteractionCard(interaction, taskName = "") {
-    const lines = [
-      taskName ? `**来源任务**：\`${taskName}\`` : "",
-      `**需要选择**：${interaction.question}`,
-      `**可选项**：${interaction.options.map((option) => `\`${option.id}\` ${option.label}`).join(" / ")}`,
-      interaction.selectedOptionId
-        ? `**当前状态**：已选择 \`${interaction.selectedOptionId}\`，正在继续执行。`
-        : `**当前状态**：等待用户选择`
-    ].filter(Boolean);
-
-    const actions = interaction.selectedOptionId
-      ? []
-      : interaction.options.map((option) =>
-          buildCardButton(option.label, option.style, {
-            action: "choose",
-            chatId: interaction.chatId,
-            chatKey: interaction.chatKey,
-            interactionId: interaction.id,
-            optionId: option.id,
-            replyToMessageId: interaction.replyToMessageId
-          })
-        );
-
-    const elements = [
-      {
-        tag: "div",
-        text: {
-          content: lines.join("\n"),
-          tag: "lark_md"
-        }
-      }
-    ];
-    if (actions.length > 0) {
-      elements.push({
-        actions,
-        tag: "action"
-      });
-    }
-
-    return {
-      config: {
-        update_multi: true,
-        wide_screen_mode: true
-      },
-      elements,
-      header: {
-        template: interaction.selectedOptionId ? "green" : "orange",
-        title: {
-          content: taskName ? `${taskName} 等待选择` : "等待选择",
-          tag: "plain_text"
-        }
-      }
-    };
-  }
-
-  async syncInteractionCard(interaction, taskName = "") {
-    if (!this.config.feishuInteractiveCardsEnabled || !interaction?.chatId) {
-      return null;
-    }
-
-    const card = this.buildInteractionCard(interaction, taskName);
-    if (interaction.cardMessageId) {
-      try {
-        await this.feishuClient.updateCard(interaction.cardMessageId, card);
-        return interaction.cardMessageId;
-      } catch (error) {
-        console.error(`[interaction:${interaction.id}] update card failed:`, error);
-      }
-    }
-
-    const payload = await this.safeSendCard(
-      {
-        chatId: interaction.chatId,
-        replyToMessageId: interaction.replyToMessageId
-      },
-      card
-    );
-    const messageId = payload?.data?.message_id || payload?.data?.message?.message_id || "";
-    return messageId || "";
+  buildInteractionText(interaction, taskName = "") {
+    return [
+      taskName ? `任务 ${taskName} 需要你做选择：` : "当前任务需要你做选择：",
+      interaction.question,
+      "",
+      ...interaction.options.map(
+        (option) => `- ${option.id}: ${option.label}\n  /choose ${option.id}`
+      )
+    ].join("\n");
   }
 
   async registerPendingInteraction(task, result, interactionRequest) {
@@ -638,15 +568,6 @@ export class BridgeService {
       workspaceDir: task.workspaceDir
     };
 
-    const conversation = this.store.getConversation(task.chatKey);
-    if (conversation?.pendingInteraction?.cardMessageId) {
-      interaction.cardMessageId = conversation.pendingInteraction.cardMessageId;
-    } else if (task.cardMessageId) {
-      interaction.cardMessageId = task.cardMessageId;
-    } else {
-      interaction.cardMessageId = "";
-    }
-
     this.store.upsertConversation(task.chatKey, {
       lastContextUsageRatio: task.contextUsageRatio,
       lastModelContextWindow: task.modelContextWindow || 0,
@@ -656,14 +577,6 @@ export class BridgeService {
       sessionId: result.sessionId || "",
       workspaceDir: task.workspaceDir
     });
-
-    const cardMessageId = await this.syncInteractionCard(interaction, buildTaskName(task));
-    if (cardMessageId && interaction.cardMessageId !== cardMessageId) {
-      interaction.cardMessageId = cardMessageId;
-      this.store.upsertConversation(task.chatKey, {
-        pendingInteraction: interaction
-      });
-    }
 
     return interaction;
   }
@@ -1313,7 +1226,6 @@ export class BridgeService {
     followUpTask.lastProgressText = `已选择 ${option.label}，等待继续执行。`;
 
     interaction.selectedOptionId = option.id;
-    await this.syncInteractionCard(interaction, interaction.sourceTaskName);
     this.store.upsertConversation(chatKey, {
       pendingInteraction: null
     });
@@ -1335,38 +1247,6 @@ export class BridgeService {
 
   buildTaskCard(task) {
     const taskName = buildTaskName(task);
-    const actions = [];
-    if (task.status === "queued" || task.status === "running") {
-      actions.push(
-        buildCardButton("终止任务", "danger", {
-          action: "abort",
-          chatId: task.target.chatId,
-          chatKey: task.chatKey,
-          replyToMessageId: task.target.replyToMessageId,
-          taskId: task.id
-        })
-      );
-    }
-    if (task.status === "interrupted") {
-      actions.push(
-        buildCardButton("重试任务", "primary", {
-          action: "retry",
-          chatId: task.target.chatId,
-          chatKey: task.chatKey,
-          replyToMessageId: task.target.replyToMessageId,
-          taskId: task.id
-        })
-      );
-    }
-    actions.push(
-      buildCardButton("重置会话", "default", {
-        action: "reset",
-        chatId: task.target.chatId,
-        chatKey: task.chatKey,
-        replyToMessageId: task.target.replyToMessageId
-      })
-    );
-
     const bodyLines = [
       `**任务**：\`${taskName}\``,
       `**状态**：${taskStatusLabel(task.status)}`,
@@ -1407,6 +1287,13 @@ export class BridgeService {
     if (task.autoCommitSummary) {
       bodyLines.push(`**自动提交**：${task.autoCommitSummary}`);
     }
+    if (task.status === "queued" || task.status === "running") {
+      bodyLines.push(`**终止命令**：\`/abort ${task.id}\``);
+    }
+    if (task.status === "interrupted") {
+      bodyLines.push(`**重试命令**：\`/retry ${task.id}\``);
+    }
+    bodyLines.push("**重置命令**：`/reset`");
 
     return {
       config: {
@@ -1420,10 +1307,6 @@ export class BridgeService {
             content: bodyLines.join("\n"),
             tag: "lark_md"
           }
-        },
-        {
-          actions,
-          tag: "action"
         }
       ],
       header: {
@@ -1746,17 +1629,10 @@ export class BridgeService {
           interactionRequest
         );
         task.finalMessage = `需要用户选择：${interaction.question}`;
-        if (!this.config.feishuInteractiveCardsEnabled) {
-          const text = [
-            `任务 ${buildTaskName(task)} 需要你做选择：`,
-            interaction.question,
-            "",
-            ...interaction.options.map(
-              (option) => `- ${option.id}: ${option.label}\n  /choose ${option.id}`
-            )
-          ].join("\n");
-          await this.safeSend(task.target, text);
-        }
+        await this.safeSend(
+          task.target,
+          this.buildInteractionText(interaction, buildTaskName(task))
+        );
         return;
       }
 
