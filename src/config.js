@@ -9,6 +9,35 @@ const DEFAULT_PRELUDE = [
   "完成后请简洁汇报结果、改动和验证情况。"
 ].join("\n");
 
+const DEFAULTS = {
+  autoCommitAfterTaskEnabled: false,
+  autoCommitMessagePrefix: "bridge: save",
+  codexApprovalPolicy: "never",
+  codexCommand: "codex",
+  codexSandbox: "workspace-write",
+  codexSkipGitRepoCheck: true,
+  contextCompactEnabled: true,
+  contextCompactThreshold: 0.8,
+  contextMemoryLoadFraction: 0.1,
+  contextWindowFallbackTokens: 128000,
+  enableHealthServer: true,
+  feishuInteractiveCardsEnabled: true,
+  feishuReplyToMessageEnabled: true,
+  feishuRequestRetries: 2,
+  feishuRequestRetryDelayMs: 300,
+  feishuRequestTimeoutMs: 10000,
+  feishuStreamCommandStatusEnabled: true,
+  feishuStreamOutputEnabled: false,
+  feishuStreamUpdateMinIntervalMs: 1200,
+  host: "127.0.0.1",
+  maxConcurrentTasks: 1,
+  maxQueuedTasksPerChat: 5,
+  maxQueuedTasksPerUser: 10,
+  maxReplyChars: 1800,
+  port: 3000,
+  requireMentionInGroup: true
+};
+
 function readEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
     return;
@@ -171,7 +200,7 @@ function resolveCodexCommand() {
     return parsedCommand;
   }
 
-  return [expandHome(process.env.CODEX_BIN || "codex")];
+  return [expandHome(DEFAULTS.codexCommand)];
 }
 
 function requireEnv(name) {
@@ -198,49 +227,67 @@ export function loadConfig(rootDir = process.cwd()) {
   );
   const gitAutoCommitEnabled = asBoolean(
     process.env.AUTO_COMMIT_AFTER_TASK_ENABLED,
-    false
+    DEFAULTS.autoCommitAfterTaskEnabled
   );
   const configuredMaxConcurrentTasks = Math.max(
     1,
-    asNumber(process.env.MAX_CONCURRENT_TASKS, 1)
+    asNumber(process.env.MAX_CONCURRENT_TASKS, DEFAULTS.maxConcurrentTasks)
   );
 
   return {
     rootDir,
-    host: process.env.HOST || "127.0.0.1",
-    port: asNumber(process.env.PORT, 3000),
-    enableHealthServer: asBoolean(process.env.ENABLE_HEALTH_SERVER, true),
+    host: process.env.HOST || DEFAULTS.host,
+    port: asNumber(process.env.PORT, DEFAULTS.port),
+    enableHealthServer: asBoolean(
+      process.env.ENABLE_HEALTH_SERVER,
+      DEFAULTS.enableHealthServer
+    ),
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
     contextMemoryDir: path.join(stateDir, "memory"),
     contextCompactEnabled: asBoolean(
       process.env.CONTEXT_COMPACT_ENABLED,
-      true
+      DEFAULTS.contextCompactEnabled
     ),
     contextCompactThreshold: Math.min(
       0.95,
-      Math.max(0.5, asNumber(process.env.CONTEXT_COMPACT_THRESHOLD, 0.8))
+      Math.max(
+        0.5,
+        asNumber(process.env.CONTEXT_COMPACT_THRESHOLD, DEFAULTS.contextCompactThreshold)
+      )
     ),
     contextMemoryLoadFraction: Math.min(
       0.2,
-      Math.max(0.02, asNumber(process.env.CONTEXT_MEMORY_LOAD_FRACTION, 0.1))
+      Math.max(
+        0.02,
+        asNumber(
+          process.env.CONTEXT_MEMORY_LOAD_FRACTION,
+          DEFAULTS.contextMemoryLoadFraction
+        )
+      )
     ),
     contextWindowFallbackTokens: Math.max(
       8192,
-      asNumber(process.env.CONTEXT_WINDOW_FALLBACK_TOKENS, 128000)
+      asNumber(
+        process.env.CONTEXT_WINDOW_FALLBACK_TOKENS,
+        DEFAULTS.contextWindowFallbackTokens
+      )
     ),
     feishuBaseUrl: process.env.FEISHU_BASE_URL || "https://open.feishu.cn",
     feishuRequestTimeoutMs: Math.max(
       1000,
-      asNumber(process.env.FEISHU_REQUEST_TIMEOUT_MS, 10000)
+      asNumber(process.env.FEISHU_REQUEST_TIMEOUT_MS, DEFAULTS.feishuRequestTimeoutMs)
     ),
     feishuRequestRetries: Math.max(
       0,
-      asNumber(process.env.FEISHU_REQUEST_RETRIES, 2)
+      asNumber(process.env.FEISHU_REQUEST_RETRIES, DEFAULTS.feishuRequestRetries)
     ),
     feishuRequestRetryDelayMs: Math.max(
       0,
-      asNumber(process.env.FEISHU_REQUEST_RETRY_DELAY_MS, 300)
+      asNumber(
+        process.env.FEISHU_REQUEST_RETRY_DELAY_MS,
+        DEFAULTS.feishuRequestRetryDelayMs
+      )
     ),
     feishuAppId: requireEnv("FEISHU_APP_ID"),
     feishuAppSecret: requireEnv("FEISHU_APP_SECRET"),
@@ -248,18 +295,17 @@ export function loadConfig(rootDir = process.cwd()) {
     feishuAllowedOpenIds: new Set(asList(process.env.FEISHU_ALLOWED_OPEN_IDS)),
     requireMentionInGroup: asBoolean(
       process.env.FEISHU_REQUIRE_MENTION_IN_GROUP,
-      true
+      DEFAULTS.requireMentionInGroup
     ),
     feishuReplyToMessageEnabled: asBoolean(
       process.env.FEISHU_REPLY_TO_MESSAGE_ENABLED,
-      true
+      DEFAULTS.feishuReplyToMessageEnabled
     ),
     feishuInteractiveCardsEnabled: asBoolean(
       process.env.FEISHU_INTERACTIVE_CARDS_ENABLED,
-      true
+      DEFAULTS.feishuInteractiveCardsEnabled
     ),
     githubRepoOwner: process.env.GITHUB_REPO_OWNER || "",
-    codexBin: process.env.CODEX_BIN || "codex",
     codexCommand: resolveCodexCommand(),
     codexWorkspaceDir: workspaceDir,
     workspaceAllowedRoots:
@@ -270,39 +316,43 @@ export function loadConfig(rootDir = process.cwd()) {
     ),
     codexModel: process.env.CODEX_MODEL || "",
     codexProfile: process.env.CODEX_PROFILE || "",
-    codexSandbox: process.env.CODEX_SANDBOX || "workspace-write",
-    codexApprovalPolicy: process.env.CODEX_APPROVAL_POLICY || "never",
+    codexSandbox: process.env.CODEX_SANDBOX || DEFAULTS.codexSandbox,
+    codexApprovalPolicy:
+      process.env.CODEX_APPROVAL_POLICY || DEFAULTS.codexApprovalPolicy,
     codexAdditionalArgs: asArgs(process.env.CODEX_ADDITIONAL_ARGS),
     codexSkipGitRepoCheck: asBoolean(
       process.env.CODEX_SKIP_GIT_REPO_CHECK,
-      true
+      DEFAULTS.codexSkipGitRepoCheck
     ),
     codexPrelude: process.env.CODEX_PRELUDE || DEFAULT_PRELUDE,
     maxConcurrentTasks: gitAutoCommitEnabled ? 1 : configuredMaxConcurrentTasks,
-    maxReplyChars: Math.max(500, asNumber(process.env.MAX_REPLY_CHARS, 1800)),
+    maxReplyChars: Math.max(500, asNumber(process.env.MAX_REPLY_CHARS, DEFAULTS.maxReplyChars)),
     taskAckEnabled: asBoolean(process.env.TASK_ACK_ENABLED, true),
     feishuStreamOutputEnabled: asBoolean(
       process.env.FEISHU_STREAM_OUTPUT_ENABLED,
-      false
+      DEFAULTS.feishuStreamOutputEnabled
     ),
     feishuStreamCommandStatusEnabled: asBoolean(
       process.env.FEISHU_STREAM_COMMAND_STATUS_ENABLED,
-      true
+      DEFAULTS.feishuStreamCommandStatusEnabled
     ),
     feishuStreamUpdateMinIntervalMs: Math.max(
       0,
-      asNumber(process.env.FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS, 1200)
+      asNumber(
+        process.env.FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS,
+        DEFAULTS.feishuStreamUpdateMinIntervalMs
+      )
     ),
     maxQueuedTasksPerChat: Math.max(
       1,
-      asNumber(process.env.MAX_QUEUED_TASKS_PER_CHAT, 5)
+      asNumber(process.env.MAX_QUEUED_TASKS_PER_CHAT, DEFAULTS.maxQueuedTasksPerChat)
     ),
     maxQueuedTasksPerUser: Math.max(
       1,
-      asNumber(process.env.MAX_QUEUED_TASKS_PER_USER, 10)
+      asNumber(process.env.MAX_QUEUED_TASKS_PER_USER, DEFAULTS.maxQueuedTasksPerUser)
     ),
     gitAutoCommitEnabled,
     gitAutoCommitMessagePrefix:
-      process.env.AUTO_COMMIT_MESSAGE_PREFIX || "bridge: save"
+      process.env.AUTO_COMMIT_MESSAGE_PREFIX || DEFAULTS.autoCommitMessagePrefix
   };
 }

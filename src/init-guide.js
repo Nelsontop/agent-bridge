@@ -9,18 +9,12 @@ const MANAGED_ENV_SECTIONS = [
       ["FEISHU_APP_ID", ""],
       ["FEISHU_APP_SECRET", ""],
       ["FEISHU_BOT_OPEN_ID", ""],
-      ["FEISHU_ALLOWED_OPEN_IDS", ""],
-      ["FEISHU_REPLY_TO_MESSAGE_ENABLED", "true"],
-      ["FEISHU_INTERACTIVE_CARDS_ENABLED", "true"]
+      ["FEISHU_ALLOWED_OPEN_IDS", ""]
     ]
   },
   {
     title: "# Server",
-    entries: [
-      ["HOST", "127.0.0.1"],
-      ["PORT", "3000"],
-      ["ENABLE_HEALTH_SERVER", "true"]
-    ]
+    entries: [["PORT", "3000"]]
   },
   {
     title: "# Codex",
@@ -28,26 +22,17 @@ const MANAGED_ENV_SECTIONS = [
       ["CODEX_WORKSPACE_DIR", ""],
       ["WORKSPACE_ALLOWED_ROOTS", ""],
       ["GITHUB_REPO_OWNER", ""],
-      ["CODEX_BIN", "codex"],
       ["CODEX_COMMAND", ""],
-      ["CODEX_SANDBOX", "workspace-write"],
-      ["CODEX_APPROVAL_POLICY", "never"],
-      ["CODEX_SKIP_GIT_REPO_CHECK", "true"]
+      ["CODEX_MODEL", ""],
+      ["CODEX_PROFILE", ""],
+      ["CHAT_WORKSPACE_MAPPINGS", ""]
     ]
   },
   {
     title: "# Bridge",
     entries: [
-      ["MAX_CONCURRENT_TASKS", "1"],
-      ["MAX_QUEUED_TASKS_PER_CHAT", "5"],
-      ["MAX_QUEUED_TASKS_PER_USER", "10"],
-      ["FEISHU_STREAM_OUTPUT_ENABLED", "true"],
-      ["FEISHU_STREAM_COMMAND_STATUS_ENABLED", "true"],
-      ["FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS", "1200"],
-      ["CONTEXT_COMPACT_ENABLED", "true"],
-      ["CONTEXT_COMPACT_THRESHOLD", "0.8"],
-      ["CONTEXT_MEMORY_LOAD_FRACTION", "0.1"],
-      ["CONTEXT_WINDOW_FALLBACK_TOKENS", "128000"]
+      ["AUTO_COMMIT_AFTER_TASK_ENABLED", "false"],
+      ["AUTO_COMMIT_MESSAGE_PREFIX", "bridge: save"]
     ]
   }
 ];
@@ -203,9 +188,7 @@ export async function runSetupWizard({
         label: "Allowed Open IDs（逗号分隔）",
         optional: true
       }),
-      HOST: existingEnv.HOST || "127.0.0.1",
       PORT: existingEnv.PORT || "3000",
-      ENABLE_HEALTH_SERVER: existingEnv.ENABLE_HEALTH_SERVER || "true",
       CODEX_WORKSPACE_DIR: await promptValue(rl, output, {
         defaultValue: existingEnv.CODEX_WORKSPACE_DIR || rootDir,
         label: "Codex 工作目录"
@@ -222,36 +205,30 @@ export async function runSetupWizard({
         label: "GitHub Owner（可留空，默认当前 gh 登录用户）",
         optional: true
       }),
-      CODEX_BIN: await promptValue(rl, output, {
-        defaultValue: existingEnv.CODEX_BIN || "codex",
-        label: "Codex 可执行文件"
-      }),
       CODEX_COMMAND: await promptValue(rl, output, {
         defaultValue: existingEnv.CODEX_COMMAND || "",
         label: "Codex 启动命令覆盖（可留空）",
         optional: true
       }),
-      CODEX_SANDBOX: existingEnv.CODEX_SANDBOX || "workspace-write",
-      CODEX_APPROVAL_POLICY: existingEnv.CODEX_APPROVAL_POLICY || "never",
-      CODEX_SKIP_GIT_REPO_CHECK: existingEnv.CODEX_SKIP_GIT_REPO_CHECK || "true",
-      FEISHU_REPLY_TO_MESSAGE_ENABLED:
-        existingEnv.FEISHU_REPLY_TO_MESSAGE_ENABLED || "true",
-      FEISHU_INTERACTIVE_CARDS_ENABLED:
-        existingEnv.FEISHU_INTERACTIVE_CARDS_ENABLED || "true",
-      MAX_CONCURRENT_TASKS: existingEnv.MAX_CONCURRENT_TASKS || "1",
-      MAX_QUEUED_TASKS_PER_CHAT: existingEnv.MAX_QUEUED_TASKS_PER_CHAT || "5",
-      MAX_QUEUED_TASKS_PER_USER: existingEnv.MAX_QUEUED_TASKS_PER_USER || "10",
-      FEISHU_STREAM_OUTPUT_ENABLED: existingEnv.FEISHU_STREAM_OUTPUT_ENABLED || "true",
-      FEISHU_STREAM_COMMAND_STATUS_ENABLED:
-        existingEnv.FEISHU_STREAM_COMMAND_STATUS_ENABLED || "true",
-      FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS:
-        existingEnv.FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS || "1200",
-      CONTEXT_COMPACT_ENABLED: existingEnv.CONTEXT_COMPACT_ENABLED || "true",
-      CONTEXT_COMPACT_THRESHOLD: existingEnv.CONTEXT_COMPACT_THRESHOLD || "0.8",
-      CONTEXT_MEMORY_LOAD_FRACTION:
-        existingEnv.CONTEXT_MEMORY_LOAD_FRACTION || "0.1",
-      CONTEXT_WINDOW_FALLBACK_TOKENS:
-        existingEnv.CONTEXT_WINDOW_FALLBACK_TOKENS || "128000"
+      CODEX_MODEL: await promptValue(rl, output, {
+        defaultValue: existingEnv.CODEX_MODEL || "",
+        label: "Codex 模型（可留空）",
+        optional: true
+      }),
+      CODEX_PROFILE: await promptValue(rl, output, {
+        defaultValue: existingEnv.CODEX_PROFILE || "",
+        label: "Codex Profile（可留空）",
+        optional: true
+      }),
+      CHAT_WORKSPACE_MAPPINGS: await promptValue(rl, output, {
+        defaultValue: existingEnv.CHAT_WORKSPACE_MAPPINGS || "",
+        label: "静态聊天目录映射（可留空）",
+        optional: true
+      }),
+      AUTO_COMMIT_AFTER_TASK_ENABLED:
+        existingEnv.AUTO_COMMIT_AFTER_TASK_ENABLED || "false",
+      AUTO_COMMIT_MESSAGE_PREFIX:
+        existingEnv.AUTO_COMMIT_MESSAGE_PREFIX || "bridge: save"
     };
 
     const finalText = buildEnvFileText(existingText, values);

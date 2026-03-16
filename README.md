@@ -280,45 +280,23 @@ FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
 FEISHU_BOT_OPEN_ID=ou_xxx
 
-HOST=127.0.0.1
 PORT=3000
-ENABLE_HEALTH_SERVER=true
 
 FEISHU_ALLOWED_OPEN_IDS=
-FEISHU_REPLY_TO_MESSAGE_ENABLED=true
-FEISHU_INTERACTIVE_CARDS_ENABLED=true
-FEISHU_REQUEST_TIMEOUT_MS=10000
-FEISHU_REQUEST_RETRIES=2
-FEISHU_REQUEST_RETRY_DELAY_MS=300
 
 CODEX_WORKSPACE_DIR=/home/you/workspace/default-project
+WORKSPACE_ALLOWED_ROOTS=/home/you/workspace
 GITHUB_REPO_OWNER=
 CHAT_WORKSPACE_MAPPINGS=
-CODEX_COMMAND=
-CODEX_BIN=codex
+CODEX_COMMAND=codex
 CODEX_MODEL=
 CODEX_PROFILE=
-CODEX_SANDBOX=workspace-write
-CODEX_APPROVAL_POLICY=never
-CODEX_SKIP_GIT_REPO_CHECK=true
-
-MAX_CONCURRENT_TASKS=1
-MAX_REPLY_CHARS=1800
-MAX_QUEUED_TASKS_PER_CHAT=5
-MAX_QUEUED_TASKS_PER_USER=10
-
-FEISHU_STREAM_OUTPUT_ENABLED=true
-FEISHU_STREAM_COMMAND_STATUS_ENABLED=true
-FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS=1200
-
-CONTEXT_COMPACT_ENABLED=true
-CONTEXT_COMPACT_THRESHOLD=0.8
-CONTEXT_MEMORY_LOAD_FRACTION=0.1
-CONTEXT_WINDOW_FALLBACK_TOKENS=128000
 
 AUTO_COMMIT_AFTER_TASK_ENABLED=false
 AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 ```
+
+上面这组配置已经足够覆盖现有功能。其余行为参数现在都有稳定默认值，除非你明确要调优，否则不建议继续往 `.env` 里堆更多开关。
 
 ### 关键配置项解释
 
@@ -327,44 +305,28 @@ AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 - `FEISHU_APP_ID` / `FEISHU_APP_SECRET`: 飞书应用凭据，必填
 - `FEISHU_BOT_OPEN_ID`: 群里需要精确判断是否 `@` 到机器人时建议填写
 - `FEISHU_ALLOWED_OPEN_IDS`: 限制允许使用机器人的用户，不填则不限制
-- `FEISHU_REPLY_TO_MESSAGE_ENABLED`: 是否回复原消息
-- `FEISHU_INTERACTIVE_CARDS_ENABLED`: 是否用交互卡片承载任务状态
 
 #### Codex 相关
 
 - `CODEX_WORKSPACE_DIR`: 默认工作目录，私聊和未单独映射的聊天会用它
-- `CODEX_COMMAND`: 覆盖默认启动命令
-- `CODEX_BIN`: 未设置 `CODEX_COMMAND` 时使用
-- `CODEX_SANDBOX`: 默认 `workspace-write`
-- `CODEX_APPROVAL_POLICY`: 默认 `never`
+- `WORKSPACE_ALLOWED_ROOTS`: 允许 `/bind` 使用的目录根路径，默认应至少覆盖 `CODEX_WORKSPACE_DIR`
+- `CODEX_COMMAND`: Codex 启动命令，默认直接使用 `codex`
+- `CODEX_MODEL` / `CODEX_PROFILE`: 需要固定模型或 profile 时再填
 
 #### 群组目录绑定相关
 
 - `GITHUB_REPO_OWNER`: `/bind` 创建 GitHub 仓库时使用的 owner；不填则使用当前 `gh` 登录用户
 - `CHAT_WORKSPACE_MAPPINGS`: 静态聊天目录映射，格式为 `chatKey=/abs/path;chat_id=/abs/path`
 
-#### 任务队列相关
-
-- `MAX_CONCURRENT_TASKS`: 全局最大并发
-- `MAX_QUEUED_TASKS_PER_CHAT`: 单个聊天最大待处理任务数
-- `MAX_QUEUED_TASKS_PER_USER`: 单个用户最大待处理任务数
-
-#### 流式输出相关
-
-- `FEISHU_STREAM_OUTPUT_ENABLED`: 是否把中间进度推回飞书
-- `FEISHU_STREAM_COMMAND_STATUS_ENABLED`: 是否显示命令开始/结束状态
-- `FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS`: 卡片最小更新间隔
-
-#### 上下文压缩相关
-
-- `CONTEXT_COMPACT_ENABLED`: 是否开启上下文压缩
-- `CONTEXT_COMPACT_THRESHOLD`: 超过该比例后触发记忆压缩
-- `CONTEXT_MEMORY_LOAD_FRACTION`: 新会话注入记忆时最多占用多少上下文比例
-
 #### 自动提交相关
 
 - `AUTO_COMMIT_AFTER_TASK_ENABLED=true` 时，每个任务结束后尝试自动 `git add -A && git commit`
 - 打开后会强制串行，避免多个任务同时改同一工作区
+
+#### 兼容说明
+
+- 历史上的细粒度调优项仍然兼容读取，例如请求超时、流式输出、上下文压缩阈值、并发限制、Codex sandbox / approval 等。
+- 这些项不再是推荐配置面，因为默认值已经足够覆盖当前功能；只有在你明确需要调优时，才建议继续使用旧键。
 
 ## 飞书后台配置步骤
 
