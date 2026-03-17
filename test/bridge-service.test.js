@@ -919,9 +919,7 @@ test("streaming agent messages are shown as user-facing progress text", async ()
   });
 
   await waitFor(() =>
-    client.cardUpdates.some((update) =>
-      update.card.elements[0].text.content.includes("正在检查流式配置，并准备给出结论。")
-    )
+    client.texts.some((item) => item.text.includes("正在检查流式配置，并准备给出结论。"))
   );
   assert.equal(
     client.texts.some((item) => item.text.includes("正在检查流式配置，并准备给出结论。")),
@@ -955,9 +953,7 @@ test("streaming command updates are summarized instead of showing raw shell", as
   });
 
   await waitFor(() =>
-    client.cardUpdates.some((update) =>
-      update.card.elements[0].text.content.includes("正在查看文件内容：src/bridge-service.js")
-    )
+    client.texts.some((item) => item.text.includes("正在查看文件内容：src/bridge-service.js"))
   );
   assert.equal(
     client.texts.some((item) => item.text.includes("正在查看文件内容：src/bridge-service.js")),

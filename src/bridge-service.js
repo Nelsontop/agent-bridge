@@ -1461,6 +1461,8 @@ export class BridgeService {
 
   buildTaskCard(task) {
     const taskName = buildTaskName(task);
+    const streamMode = (this.config.feishuStreamMode || "card").toLowerCase();
+    const includeNarrativeSections = streamMode === "card";
     const bodyLines = [
       `**任务**：\`${taskName}\``,
       `**状态**：${taskStatusLabel(task.status)}`,
@@ -1483,12 +1485,12 @@ export class BridgeService {
     if (task.startedAt) {
       bodyLines.push(`**开始时间**：${task.startedAt}`);
     }
-    if (task.lastProgressText) {
+    if (includeNarrativeSections && task.lastProgressText) {
       bodyLines.push(
         `**最近更新**：\n${truncateText(task.lastProgressText, this.config.maxReplyChars)}`
       );
     }
-    if (task.finalMessage) {
+    if (includeNarrativeSections && task.finalMessage) {
       bodyLines.push(
         `**结果摘要**：\n${truncateText(task.finalMessage, this.config.maxReplyChars)}`
       );
