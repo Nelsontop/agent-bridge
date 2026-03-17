@@ -1,134 +1,57 @@
 # Codex Feishu Bridge
 
-一个运行在本地机器上的桥接服务：通过飞书长连接接收机器人事件，把聊天消息转成 `codex exec` / `codex exec resume` 任务，再把执行进度和结果回传到飞书。
+本项目把飞书消息转为本机 CLI 任务执行，并把进度/结果回传飞书。
 
-它适合这些场景：
+目标：让你在 5 分钟内跑起来。
 
-- 在飞书里直接驱动本机上的 Codex CLI
-- 按聊天维度复用 Codex session，而不是每条消息都重新开上下文
-- 为群聊绑定固定工作目录，并在首次绑定时顺手初始化 Git / GitHub 仓库
+## 1. 你需要准备什么
 
-## 核心能力
+- Node.js `>=18.18`
+- 本机可执行的 CLI（默认 `codex`）
+- 飞书企业自建应用（开启机器人）
+- 可选：`gh`（如果你要在 `/bind` 时自动建 GitHub 仓库）
 
-- 私聊直接发送文本任务
-- 群聊通过 `@机器人` 发送任务
-- 同一聊天自动复用 Codex session
-- 群聊通过 `/bind <工作目录> [仓库名]` 绑定固定目录
-- `/bind` 目录受 `WORKSPACE_ALLOWED_ROOTS` 白名单约束
-- 绑定时自动初始化本地 Git 仓库，并在可用时调用 `gh repo create --public`
-- 任务过程通过飞书消息或共享卡片持续更新
-- 支持 `/help`、`/status`、`/reset`、`/abort`、`/retry`、`/choose`
-- 本地持久化聊天状态、排队任务、交互选项和上下文记忆
-- 可选任务完成后自动 Git 提交
+## 2. 最快启动（推荐路径）
 
-## 运行前提
-
-- Node.js 18.18 或更高版本
-- 本机已安装 `codex`
-- 已有飞书企业自建应用，并开启机器人能力
-- 如果要自动创建 GitHub 公共仓库，本机还需要安装并登录 `gh`
-
-## 快速开始
-
-### 1. 安装依赖
+1. 安装依赖
 
 ```bash
 npm install
 ```
 
-### 2. 生成 `.env`
+2. 生成配置
 
 ```bash
 npm run setup
 ```
 
-向导会生成或补全项目根目录下的 `.env`。
-
-### 3. 配置飞书应用
-
-至少完成这些设置：
-
-1. 开启机器人能力
-2. 安装应用到企业
-3. 在“事件与回调”中订阅：
-   - `im.message.receive_v1`
-   - `im.chat.member.bot.added_v1`
-   - `card.action.trigger`
-4. 订阅方式选择“使用长连接接收事件/回调”
-
-### 4. 启动服务
+3. 启动服务
 
 ```bash
 npm start
 ```
 
-如果你要让服务在终端断开后仍然常驻，优先用 `systemd --user`：
-
-```bash
-npm run service:install
-```
-
-安装后可用这些命令管理：
-
-```bash
-npm run service:status
-npm run service:restart
-npm run service:logs
-```
-
-### 5. 验证健康检查
+4. 检查健康状态
 
 ```bash
 curl http://127.0.0.1:3000/healthz
 ```
 
-如果你在 `.env` 中修改了 `HOST` 或 `PORT`，这里也要跟着调整。
+返回 `{"ok":true,...}` 即服务正常。
 
-### 6. 在飞书里验证
+## 3. 飞书后台必须配置
 
-- 私聊机器人，直接发送文本任务
-- 把机器人拉进群
-- 第一次进群后先执行 `/bind`
-- 绑定成功后，在群里 `@机器人` 发送任务
+在飞书开发者后台完成以下 4 项：
 
-## 典型流程
+1. 开启机器人能力
+2. 安装应用到企业
+3. 订阅事件：
+   - `im.message.receive_v1`
+   - `im.chat.member.bot.added_v1`
+   - `card.action.trigger`
+4. 订阅方式选择：`使用长连接接收事件/回调`
 
-### 私聊
-
-1. 用户发送文本消息
-2. Bridge 创建或恢复该私聊对应的 Codex session
-3. Codex 在默认工作目录执行任务
-4. 结果通过文本或卡片回到飞书
-
-### 群聊
-
-1. 机器人首次被拉进群
-2. Bridge 提示执行 `/bind <工作目录> [仓库名]`
-3. 绑定成功后，把群与本地目录持久化关联
-4. 后续该群所有任务都固定在该目录执行
-5. `/reset` 只清空 session，不取消目录绑定
-
-如果目录里有空格，可以这样写：
-
-```text
-/bind "/vol3/1000/workspace/Project A" project-a
-```
-
-## 命令说明
-
-- `/help`：查看帮助
-- `/bind <工作目录> [仓库名]`：绑定当前群组目录并准备 Git / GitHub 仓库
-- `/status`：查看当前聊天的工作目录、session、队列和中断任务
-- `/reset`：清空当前聊天的 Codex session，保留工作目录绑定
-- `/abort <任务号>`：终止运行中的任务，或取消排队任务
-- `/retry [任务号]`：重试当前聊天最近的中断任务，或指定任务
-- `/choose <选项ID>`：继续等待用户选择的任务
-
-其余文本会直接作为任务发送给 Codex。
-
-## 配置说明
-
-项目根目录使用 `.env` 配置。下面是一份最常用的起步配置：
+## 4. `.env` 最小可用配置
 
 ```dotenv
 FEISHU_APP_ID=cli_xxx
@@ -140,257 +63,153 @@ PORT=3000
 
 CODEX_WORKSPACE_DIR=/home/you/workspace/default-project
 WORKSPACE_ALLOWED_ROOTS=/home/you/workspace
-GITHUB_REPO_OWNER=
-CHAT_WORKSPACE_MAPPINGS=
 
-CODEX_COMMAND=codex
 CLI_PROVIDER=codex
 CHANNEL_PROVIDER=feishu
-CODEX_MODEL=
-CODEX_PROFILE=
-
-AUTO_COMMIT_AFTER_TASK_ENABLED=false
-AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 ```
 
-### 必填项
+### 必填项说明（简版）
 
-- `FEISHU_APP_ID` / `FEISHU_APP_SECRET`：飞书应用凭据
-- `CODEX_WORKSPACE_DIR`：默认工作目录；私聊和未单独映射的聊天都使用它
+- `FEISHU_APP_ID` / `FEISHU_APP_SECRET`：飞书凭据
+- `CODEX_WORKSPACE_DIR`：默认执行目录（私聊默认使用）
+- `WORKSPACE_ALLOWED_ROOTS`：群聊 `/bind` 允许绑定的根目录
 
-### 常用项
+## 5. 聊天里怎么用
 
-- `FEISHU_BOT_OPEN_ID`：群聊中精确判断是否 `@` 到机器人时建议填写
-- `FEISHU_ALLOWED_OPEN_IDS`：限制允许使用机器人的用户；不填则不限制
-- `WORKSPACE_ALLOWED_ROOTS`：允许 `/bind` 使用的目录根路径；默认至少应覆盖 `CODEX_WORKSPACE_DIR`
-- `GITHUB_REPO_OWNER`：`/bind` 创建 GitHub 仓库时使用的 owner；不填则使用当前 `gh` 登录用户
-- `CHAT_WORKSPACE_MAPPINGS`：静态聊天目录映射，格式 `chatKey=/abs/path;chat_id=/abs/path`
-- `CODEX_COMMAND`：覆盖默认 `codex` 启动命令，支持带参数
-- `CLI_PROVIDER`：选择当前全局 CLI provider（`codex` / `claude-code` / `opencode` / `kimi-cli`）
-- `CHANNEL_PROVIDER`：选择当前接入渠道（`feishu` 可用；`dingtalk` / `telegram` 为预留骨架）
-- `CLAUDE_CODE_COMMAND` / `CLAUDE_CODE_ADDITIONAL_ARGS`：配置 `claude-code` provider 的命令与附加参数
-- `OPENCODE_COMMAND` / `OPENCODE_ADDITIONAL_ARGS`：配置 `opencode` provider 的命令与附加参数
-- `KIMI_CLI_COMMAND` / `KIMI_CLI_ADDITIONAL_ARGS`：配置 `kimi-cli` provider 的命令与附加参数
-- `CODEX_MODEL` / `CODEX_PROFILE`：需要固定模型或 profile 时再填
+### 私聊机器人
 
-### 可选调优项
+- 直接发送任务文本即可
 
-下面这些配置在代码中都支持，默认值通常已经够用：
+### 群聊
 
-- `ENABLE_HEALTH_SERVER`
-- `STATE_DIR`
-- `FEISHU_REQUIRE_MENTION_IN_GROUP`
-- `FEISHU_REPLY_TO_MESSAGE_ENABLED`
-- `FEISHU_INTERACTIVE_CARDS_ENABLED`
-- `FEISHU_STREAM_OUTPUT_ENABLED`
-- `FEISHU_STREAM_COMMAND_STATUS_ENABLED`
-- `FEISHU_STREAM_UPDATE_MIN_INTERVAL_MS`
-- `FEISHU_REQUEST_TIMEOUT_MS`
-- `FEISHU_REQUEST_RETRIES`
-- `FEISHU_REQUEST_RETRY_DELAY_MS`
-- `MAX_CONCURRENT_TASKS`
-- `MAX_QUEUED_TASKS_PER_CHAT`
-- `MAX_QUEUED_TASKS_PER_USER`
-- `MAX_REPLY_CHARS`
-- `TASK_ACK_ENABLED`
-- `CODEX_SANDBOX`
-- `CODEX_APPROVAL_POLICY`
-- `CODEX_ADDITIONAL_ARGS`
-- `CODEX_SKIP_GIT_REPO_CHECK`
-- `CODEX_PRELUDE`
-- `CONTEXT_COMPACT_ENABLED`
-- `CONTEXT_COMPACT_THRESHOLD`
-- `CONTEXT_MEMORY_LOAD_FRACTION`
-- `CONTEXT_WINDOW_FALLBACK_TOKENS`
-
-如果你不确定是否需要这些开关，先使用默认值。
-
-## 项目结构
-
-运行时代码在 [`src/`](/vol3/1000/workspace/codex-bridge/src)：
-
-V1 重构后采用 `core + providers` 分层：
-
-- `src/core/`：核心契约与任务编排（与具体 CLI/渠道解耦）
-- `src/providers/cli/`：CLI 适配层（当前含 `codex`）
-- `src/providers/channel/`：渠道适配层（当前含 `feishu`）
-
-- [`src/index.js`](/vol3/1000/workspace/codex-bridge/src/index.js)：进程入口，加载配置、启动健康检查与飞书长连接
-- [`src/bridge-service.js`](/vol3/1000/workspace/codex-bridge/src/bridge-service.js)：事件分发、任务队列、状态同步、交互处理
-- [`src/bridge-command-router.js`](/vol3/1000/workspace/codex-bridge/src/bridge-command-router.js)：`/bind`、`/status`、`/reset` 等命令路由
-- [`src/codex-runner.js`](/vol3/1000/workspace/codex-bridge/src/codex-runner.js)：封装 `codex exec` / `codex exec resume`
-- [`src/feishu-client.js`](/vol3/1000/workspace/codex-bridge/src/feishu-client.js)：调用飞书 HTTP API 发送消息和更新卡片
-- [`src/feishu-ws-client.js`](/vol3/1000/workspace/codex-bridge/src/feishu-ws-client.js)：管理飞书长连接事件流
-- [`src/state-store.js`](/vol3/1000/workspace/codex-bridge/src/state-store.js)：持久化聊天状态和运行时快照
-- [`src/workspace-binding.js`](/vol3/1000/workspace/codex-bridge/src/workspace-binding.js)：目录绑定、Git 初始化、GitHub 仓库创建
-- [`src/workspace-policy.js`](/vol3/1000/workspace/codex-bridge/src/workspace-policy.js)：校验 `/bind` 目标目录是否命中允许范围
-- [`src/git-commit.js`](/vol3/1000/workspace/codex-bridge/src/git-commit.js)：可选自动提交与失败回滚
-- [`src/init-guide.js`](/vol3/1000/workspace/codex-bridge/src/init-guide.js)：`npm run setup` 初始化向导
-
-测试文件在 [`test/`](/vol3/1000/workspace/codex-bridge/test)。
-
-## 最新改动（2026-03-17）
-
-- 架构升级为 `core + providers`：`BridgeService` 通过 `TaskOrchestrator` 调度 CLI provider。
-- 新增全局配置 `CLI_PROVIDER` 与 `CHANNEL_PROVIDER`，当前默认 `codex + feishu`。
-- CLI provider 已内置 `codex`、`claude-code`、`opencode`、`kimi-cli`（后 3 个为可配置接入）。
-- channel adapter 已内置 `feishu`，`dingtalk` 与 `telegram` 为骨架预留。
-- `/healthz` 保持向后兼容，并新增 `channelProvider`、`cliProvider` 字段用于观测。
-- 验证状态：自动测试（`npm test`）已通过；飞书手工消息流（开始/进度/完成）已验证通过。
-
-本地状态默认写入：
-
-- `.codex-feishu-bridge/state.json`
-- `.codex-feishu-bridge/memory/`
-
-## 开发与运维
-
-### 本地开发
-
-```bash
-npm run dev
-```
-
-### 生产式启动
-
-```bash
-npm start
-```
-
-### 常驻后台启动（systemd --user）
-
-适用前提：
-
-- Linux，且宿主机使用 `systemd`
-- 当前用户可执行 `systemctl --user`
-
-安装并立即启动：
-
-```bash
-npm run service:install
-```
-
-这会把 unit 写到：
+1. 先执行：
 
 ```text
-~/.config/systemd/user/codex-feishu-bridge.service
+/bind /你的工作目录 [可选仓库名]
 ```
 
-常用管理命令：
+2. 再 `@机器人` 发送任务
 
-```bash
-npm run service:status
-npm run service:start
-npm run service:stop
-npm run service:restart
-npm run service:logs
-npm run service:remove
-```
+### 常用命令
 
-如果你希望在“没有任何登录会话”时也继续常驻，例如 SSH 退出后仍保活，再额外执行：
+- `/help`：查看帮助
+- `/status`：查看当前聊天状态
+- `/reset`：清空当前聊天 session（保留绑定目录）
+- `/abort <任务号>`：取消任务
+- `/retry [任务号]`：重试中断任务
+- `/choose <选项ID>`：继续交互式任务
 
-```bash
-loginctl enable-linger "$USER"
-```
+## 6. Provider 配置（V1）
 
-如果这个前提不成立会怎样？
+当前架构是 `core + providers`，但运行时是“全局单选”。
 
-- `systemctl --user` 不可用时，`npm run service:install` 会直接失败
-- 没启用 linger 时，服务通常能跨终端存活，但未必能跨“最后一个用户会话退出”
+### CLI_PROVIDER
 
-### 健康检查
+支持值：
+
+- `codex`（默认）
+- `claude-code`
+- `opencode`
+- `kimi-cli`
+
+按需补充命令：
+
+- `CLAUDE_CODE_COMMAND` / `CLAUDE_CODE_ADDITIONAL_ARGS`
+- `OPENCODE_COMMAND` / `OPENCODE_ADDITIONAL_ARGS`
+- `KIMI_CLI_COMMAND` / `KIMI_CLI_ADDITIONAL_ARGS`
+
+### CHANNEL_PROVIDER
+
+支持值：
+
+- `feishu`（可用）
+- `dingtalk`（预留）
+- `telegram`（预留）
+
+## 7. 健康检查与观测
+
+访问：
 
 ```bash
 curl http://127.0.0.1:${PORT:-3000}/healthz
 ```
 
-健康检查会返回：
+重点字段：
 
-- 当前会话数
-- 排队和运行中的任务数
-- 中断任务数
-- 飞书 HTTP / WS 指标
-- 最近重连信息
+- `ok`
+- `transport`
+- `channelProvider`
+- `cliProvider`
+- `queuedTasks` / `runningTasks`
+- `feishu` / `ws` / `reconnect`
 
-## 测试
+## 8. 常用运行命令
 
-运行测试：
+- 开发模式：
+
+```bash
+npm run dev
+```
+
+- 测试：
 
 ```bash
 npm test
 ```
 
-当前仓库包含 Node 内置测试，覆盖：
+- 安装 systemd 用户服务：
 
-- Bridge 路由与任务队列
-- Codex runner 的取消和恢复
-- 命令解析
-- Feishu HTTP / WS 客户端
-- 初始化向导
-- Git 自动提交
-- 工作目录绑定策略
+```bash
+npm run service:install
+```
 
-对于涉及飞书真实环境的改动，仍建议补做一次手工验证：
+- 查看日志：
 
-1. 启动服务
-2. 访问 `/healthz`
-3. 用真实机器人完成一次私聊任务
-4. 在群聊里执行一次 `/bind` 和一次普通任务
+```bash
+npm run service:logs
+```
 
-## 常见问题
+## 9. 最常见问题（速查）
 
-### 群里发消息没反应
+### 1) 群里 `@` 了机器人但没反应
 
 优先检查：
 
 - 是否真的 `@` 到机器人
-- 是否开启了 `FEISHU_REQUIRE_MENTION_IN_GROUP`
-- 飞书后台是否已订阅 `im.message.receive_v1`
-- 订阅方式是否确实是长连接
+- 飞书后台事件是否都已订阅
+- 是否使用了“长连接接收事件”
 
-### 群里一直提示先 `/bind`
+### 2) 一直提示先 `/bind`
 
-说明当前群还没有工作目录绑定，或者绑定信息被清掉了。直接执行：
+说明当前群未绑定目录，执行：
 
 ```text
-/bind /你的工作目录 仓库名
+/bind /你的工作目录
 ```
 
-### `/bind` 失败
-
-常见原因：
-
-- 目录路径无效，或不在 `WORKSPACE_ALLOWED_ROOTS` 白名单内
-- `git commit` 失败，本机未配置 `user.name` / `user.email`
-- `gh` 未登录
-- GitHub 上仓库名已存在，且当前账号无权创建
-
-### 健康检查访问不到
+### 3) `/healthz` 访问不到
 
 检查：
 
-- `.env` 里的 `HOST` 和 `PORT`
-- `ENABLE_HEALTH_SERVER` 是否被关闭
-- 服务是否已成功启动
+- 服务是否真的启动成功
+- `HOST` / `PORT` 是否改过
+- 端口是否被占用
 
-### 任务执行到一半后服务重启
+## 10. 项目结构（只看核心）
 
-Bridge 会把运行快照写到 `.codex-feishu-bridge/state.json`。重启后：
+- [`src/index.js`](/vol3/1000/workspace/codex-bridge/src/index.js)：入口与装配
+- [`src/bridge-service.js`](/vol3/1000/workspace/codex-bridge/src/bridge-service.js)：消息处理、队列、状态机
+- [`src/core/`](/vol3/1000/workspace/codex-bridge/src/core)：契约与任务编排
+- [`src/providers/cli/`](/vol3/1000/workspace/codex-bridge/src/providers/cli)：CLI provider
+- [`src/providers/channel/`](/vol3/1000/workspace/codex-bridge/src/providers/channel)：渠道 adapter
+- [`test/`](/vol3/1000/workspace/codex-bridge/test)：Node 内置测试
 
-- 排队任务会恢复
-- 运行中的任务会被标记为中断
-- 可以通过 `/retry` 重新入队
+## 11. 安全边界
 
-## 安全边界
+- 删除/清空类操作需明确确认
+- 建议设置 `FEISHU_ALLOWED_OPEN_IDS` 限制使用者
+- 建议保留 `CODEX_SANDBOX=workspace-write`
 
-- 默认要求删除、清空、销毁类操作前必须明确确认
-- 可以通过 `FEISHU_ALLOWED_OPEN_IDS` 限制使用者
-- 默认使用 `CODEX_APPROVAL_POLICY=never`
-- 默认使用 `CODEX_SANDBOX=workspace-write`
-- `/bind` 只能落到 `WORKSPACE_ALLOWED_ROOTS` 允许的目录中
+---
 
-## 当前限制
-
-- 当前只支持文本消息
-- 当前依赖飞书长连接模式
-- 任务结果主要通过更新消息或共享卡片呈现，不会为每次状态变化都发送新消息
+如果你只想先跑通：按第 2、3、4、5 节执行即可。
