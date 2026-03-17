@@ -96,6 +96,7 @@ function createConfig(overrides = {}) {
     feishuInteractiveCardsEnabled: true,
     feishuReplyToMessageEnabled: true,
     feishuStreamCommandStatusEnabled: true,
+    feishuStreamMode: "hybrid",
     feishuStreamOutputEnabled: true,
     feishuStreamUpdateMinIntervalMs: 0,
     githubRepoOwner: "",
@@ -922,6 +923,10 @@ test("streaming agent messages are shown as user-facing progress text", async ()
       update.card.elements[0].text.content.includes("正在检查流式配置，并准备给出结论。")
     )
   );
+  assert.equal(
+    client.texts.some((item) => item.text.includes("正在检查流式配置，并准备给出结论。")),
+    true
+  );
 });
 
 test("streaming command updates are summarized instead of showing raw shell", async () => {
@@ -953,6 +958,10 @@ test("streaming command updates are summarized instead of showing raw shell", as
     client.cardUpdates.some((update) =>
       update.card.elements[0].text.content.includes("正在查看文件内容：src/bridge-service.js")
     )
+  );
+  assert.equal(
+    client.texts.some((item) => item.text.includes("正在查看文件内容：src/bridge-service.js")),
+    true
   );
   assert.equal(
     client.cardUpdates.some((update) =>

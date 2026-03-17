@@ -37,6 +37,7 @@ const DEFAULTS = {
   feishuRequestRetryDelayMs: 300,
   feishuRequestTimeoutMs: 10000,
   feishuStreamCommandStatusEnabled: true,
+  feishuStreamMode: "hybrid",
   feishuStreamOutputEnabled: false,
   feishuStreamUpdateMinIntervalMs: 1200,
   host: "127.0.0.1",
@@ -270,6 +271,15 @@ export function loadConfig(rootDir = process.cwd()) {
       `Unsupported CLI_PROVIDER: ${cliProvider}. Supported values: ${SUPPORTED_CLI_PROVIDERS.join(", ")}`
     );
   }
+  const feishuStreamMode = (
+    process.env.FEISHU_STREAM_MODE ||
+    DEFAULTS.feishuStreamMode
+  ).trim().toLowerCase();
+  if (!["card", "text", "hybrid"].includes(feishuStreamMode)) {
+    throw new Error(
+      `Unsupported FEISHU_STREAM_MODE: ${feishuStreamMode}. Supported values: card, text, hybrid`
+    );
+  }
 
   return {
     rootDir,
@@ -391,6 +401,7 @@ export function loadConfig(rootDir = process.cwd()) {
       process.env.FEISHU_STREAM_COMMAND_STATUS_ENABLED,
       DEFAULTS.feishuStreamCommandStatusEnabled
     ),
+    feishuStreamMode,
     feishuStreamUpdateMinIntervalMs: Math.max(
       0,
       asNumber(

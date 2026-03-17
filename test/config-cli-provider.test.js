@@ -46,6 +46,7 @@ function baseEnv(rootDir) {
     OPENCODE_ADDITIONAL_ARGS: undefined,
     KIMI_CLI_COMMAND: undefined,
     KIMI_CLI_ADDITIONAL_ARGS: undefined,
+    FEISHU_STREAM_MODE: undefined,
     CHANNEL_PROVIDER: undefined,
     CLI_PROVIDER: undefined
   };
@@ -158,6 +159,38 @@ test("loadConfig resolves OPENCODE and KIMI_CLI commands", () => {
       const config = loadConfig(rootDir);
       assert.deepEqual(config.opencodeCommand, ["opencode", "--json"]);
       assert.deepEqual(config.kimiCliCommand, ["kimi", "chat", "--stream"]);
+    }
+  );
+});
+
+test("loadConfig defaults FEISHU_STREAM_MODE to hybrid", () => {
+  const rootDir = makeRoot("config-stream-mode-default-");
+  withEnv(baseEnv(rootDir), () => {
+    const config = loadConfig(rootDir);
+    assert.equal(config.feishuStreamMode, "hybrid");
+  });
+});
+
+test("loadConfig validates FEISHU_STREAM_MODE", () => {
+  const rootDir = makeRoot("config-stream-mode-");
+  withEnv(
+    {
+      ...baseEnv(rootDir),
+      FEISHU_STREAM_MODE: "text"
+    },
+    () => {
+      const config = loadConfig(rootDir);
+      assert.equal(config.feishuStreamMode, "text");
+    }
+  );
+
+  withEnv(
+    {
+      ...baseEnv(rootDir),
+      FEISHU_STREAM_MODE: "invalid"
+    },
+    () => {
+      assert.throws(() => loadConfig(rootDir), /Unsupported FEISHU_STREAM_MODE/);
     }
   );
 });

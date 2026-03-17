@@ -1658,13 +1658,20 @@ export class BridgeService {
           await sleep(waitMs);
         }
 
-        if (this.config.feishuInteractiveCardsEnabled) {
+        const streamMode = (this.config.feishuStreamMode || "card").toLowerCase();
+        const streamToCard =
+          this.config.feishuInteractiveCardsEnabled &&
+          (streamMode === "card" || streamMode === "hybrid");
+        const streamToText =
+          !this.config.feishuInteractiveCardsEnabled ||
+          streamMode === "text" ||
+          streamMode === "hybrid";
+
+        if (streamToCard) {
           await this.syncTaskCard(task);
-        } else {
-          const chunks = splitText(normalized, this.config.maxReplyChars);
-          for (const chunk of chunks) {
-            await this.safeSend(task.target, chunk);
-          }
+        }
+        if (streamToText) {
+          await this.safeSend(task.target, normalized);
         }
         task.lastStreamSentAt = Date.now();
         this.persistRuntime();
