@@ -229,6 +229,15 @@ V1 重构后采用 `core + providers` 分层：
 
 测试文件在 [`test/`](/vol3/1000/workspace/codex-bridge/test)。
 
+## 最新改动（2026-03-17）
+
+- 架构升级为 `core + providers`：`BridgeService` 通过 `TaskOrchestrator` 调度 CLI provider。
+- 新增全局配置 `CLI_PROVIDER` 与 `CHANNEL_PROVIDER`，当前默认 `codex + feishu`。
+- CLI provider 已内置 `codex`、`claude-code`、`opencode`、`kimi-cli`（后 3 个为可配置接入）。
+- channel adapter 已内置 `feishu`，`dingtalk` 与 `telegram` 为骨架预留。
+- `/healthz` 保持向后兼容，并新增 `channelProvider`、`cliProvider` 字段用于观测。
+- 验证状态：自动测试（`npm test`）已通过；飞书手工消息流（开始/进度/完成）已验证通过。
+
 本地状态默认写入：
 
 - `.codex-feishu-bridge/state.json`
