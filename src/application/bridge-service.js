@@ -1,18 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
-import { createCliProviderRegistry } from "./core/cli-provider.js";
-import { TaskOrchestrator } from "./core/task-orchestrator.js";
-import { registerBuiltinCliProviders } from "./providers/cli/index.js";
-import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "./workspace-binding.js";
+import { runCodexTask as defaultRunCodexTask } from "../infrastructure/cli/codex-runner.js";
+import { createCliProviderRegistry } from "../core/cli-provider.js";
+import { TaskOrchestrator } from "../core/task-orchestrator.js";
+import { registerBuiltinCliProviders } from "../providers/cli/index.js";
+import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "../infrastructure/workspace/workspace-binding.js";
 import { BridgeCommandRouter } from "./bridge-command-router.js";
 import { markTaskCompleted, markTaskFailed, markTaskRunning } from "./task-lifecycle.js";
 import { TaskRuntime } from "./task-runtime.js";
 import {
   autoCommitWorkspace as defaultAutoCommitWorkspace,
   rollbackAutoCommitWorkspace as defaultRollbackAutoCommitWorkspace
-} from "./git-commit.js";
+} from "../infrastructure/git/git-commit.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

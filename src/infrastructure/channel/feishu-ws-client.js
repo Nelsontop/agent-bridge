@@ -1,5 +1,5 @@
-import larkSdk from "../.vendor/lark-sdk-1.59.0/lib/index.js";
-import { fetchJsonWithRetry } from "./http-utils.js";
+import larkSdk from "../../../.vendor/lark-sdk-1.59.0/lib/index.js";
+import { fetchJsonWithRetry } from "../net/http-utils.js";
 
 const { WSClient, LoggerLevel } = larkSdk;
 

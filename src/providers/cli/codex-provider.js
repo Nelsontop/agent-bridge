@@ -1,4 +1,4 @@
-import { runCodexTask } from "../../codex-runner.js";
+import { runCodexTask } from "../../infrastructure/cli/codex-runner.js";
 import { assertCliProvider } from "../../core/cli-provider.js";
 
 export function createCodexProvider(config, dependencies = {}) {

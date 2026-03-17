@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FeishuWsClient, extractWsEventType } from "../src/feishu-ws-client.js";
+import { FeishuWsClient, extractWsEventType } from "../src/infrastructure/channel/feishu-ws-client.js";
 
 test("extractWsEventType supports flattened and nested payloads", () => {
   assert.equal(

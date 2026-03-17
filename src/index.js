@@ -1,15 +1,15 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { StateStore } from "./state-store.js";
-import { BridgeService } from "./bridge-service.js";
-import { buildMissingConfigGuide, runSetupWizard } from "./init-guide.js";
+import { StateStore } from "./infrastructure/state/state-store.js";
+import { BridgeService } from "./application/bridge-service.js";
+import { buildMissingConfigGuide, runSetupWizard } from "./application/init-guide.js";
 import { createChannelAdapter } from "./providers/channel/index.js";
 import {
   buildSystemdUserService,
   getSystemdUserServicePath,
   installSystemdUserService,
   removeSystemdUserService
-} from "./systemd-user-service.js";
+} from "./infrastructure/system/systemd-user-service.js";
 
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;

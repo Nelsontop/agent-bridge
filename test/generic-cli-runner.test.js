@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runGenericCliTask } from "../src/generic-cli-runner.js";
+import { runGenericCliTask } from "../src/infrastructure/cli/generic-cli-runner.js";
 
 const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 

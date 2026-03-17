@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BridgeService } from "../src/bridge-service.js";
+import { BridgeService } from "../src/application/bridge-service.js";
 
 const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 const FIXTURE_DIR = path.join(process.cwd(), "test", "fixtures");
@@ -948,15 +948,17 @@ test("streaming command updates are summarized instead of showing raw shell", as
     item: {
       id: "item_command_progress",
       type: "command_execution",
-      command: "/bin/bash -lc \"sed -n '1,160p' src/bridge-service.js\""
+      command: "/bin/bash -lc \"sed -n '1,160p' src/application/bridge-service.js\""
     }
   });
 
   await waitFor(() =>
-    client.texts.some((item) => item.text.includes("正在查看文件内容：src/bridge-service.js"))
+    client.texts.some((item) => item.text.includes("正在查看文件内容：src/application/bridge-service.js"))
   );
   assert.equal(
-    client.texts.some((item) => item.text.includes("正在查看文件内容：src/bridge-service.js")),
+    client.texts.some((item) =>
+      item.text.includes("正在查看文件内容：src/application/bridge-service.js")
+    ),
     true
   );
   assert.equal(

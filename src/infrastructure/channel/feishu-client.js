@@ -1,4 +1,4 @@
-import { fetchJsonWithRetry } from "./http-utils.js";
+import { fetchJsonWithRetry } from "../net/http-utils.js";
 
 function jsonHeaders(token) {
   const headers = {

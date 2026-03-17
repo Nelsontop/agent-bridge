@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FeishuClient } from "../src/feishu-client.js";
+import { FeishuClient } from "../src/infrastructure/channel/feishu-client.js";
 
 function createConfig(overrides = {}) {
   return {

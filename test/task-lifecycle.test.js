@@ -6,7 +6,7 @@ import {
   markTaskFailed,
   markTaskQueuedForRetry,
   markTaskRunning
-} from "../src/task-lifecycle.js";
+} from "../src/application/task-lifecycle.js";
 
 function createTask(overrides = {}) {
   return {

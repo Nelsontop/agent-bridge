@@ -196,7 +196,9 @@ npm run service:logs
 ## 10. 项目结构（只看核心）
 
 - [`src/index.js`](/vol3/1000/workspace/codex-bridge/src/index.js)：入口与装配
-- [`src/bridge-service.js`](/vol3/1000/workspace/codex-bridge/src/bridge-service.js)：消息处理、队列、状态机
+- [`src/application/bridge-service.js`](/vol3/1000/workspace/codex-bridge/src/application/bridge-service.js)：应用服务，负责消息处理、队列、状态机
+- [`src/domain/`](/vol3/1000/workspace/codex-bridge/src/domain)：领域规则与策略
+- [`src/infrastructure/`](/vol3/1000/workspace/codex-bridge/src/infrastructure)：外部系统适配（CLI、飞书、状态持久化、系统服务）
 - [`src/core/`](/vol3/1000/workspace/codex-bridge/src/core)：契约与任务编排
 - [`src/providers/cli/`](/vol3/1000/workspace/codex-bridge/src/providers/cli)：CLI provider
 - [`src/providers/channel/`](/vol3/1000/workspace/codex-bridge/src/providers/channel)：渠道 adapter

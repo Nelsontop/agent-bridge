@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSystemdUserService } from "../src/systemd-user-service.js";
+import { buildSystemdUserService } from "../src/infrastructure/system/systemd-user-service.js";
 
 test("buildSystemdUserService renders a restartable user service", () => {
   const service = buildSystemdUserService({

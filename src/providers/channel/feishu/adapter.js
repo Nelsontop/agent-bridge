@@ -1,6 +1,6 @@
 import { assertChannelAdapter } from "../../../core/channel-adapter.js";
-import { FeishuClient } from "../../../feishu-client.js";
-import { FeishuWsClient } from "../../../feishu-ws-client.js";
+import { FeishuClient } from "../../../infrastructure/channel/feishu-client.js";
+import { FeishuWsClient } from "../../../infrastructure/channel/feishu-ws-client.js";
 
 export class FeishuChannelAdapter {
   constructor(config, options = {}) {
