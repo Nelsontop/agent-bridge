@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
+import readline from "node:readline";
 
 export function runGenericCliTask(commandParts, {
   prompt,
   sessionId,
   workspaceDir,
-  supportsResume = false
+  supportsResume = false,
+  onEvent
 } = {}) {
   if (!Array.isArray(commandParts) || commandParts.length === 0) {
     throw new Error("Generic CLI command is empty");
@@ -27,8 +29,24 @@ export function runGenericCliTask(commandParts, {
   let stderr = "";
   let resolved = false;
 
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk.toString("utf8");
+  const stdoutReader = readline.createInterface({ input: child.stdout });
+  stdoutReader.on("line", (line) => {
+    stdout += `${line}\n`;
+
+    const text = String(line || "").trim();
+    if (!text) {
+      return;
+    }
+
+    // Emit codex-compatible stream events so BridgeService can reuse
+    // existing progress rendering without provider-specific branching.
+    onEvent?.({
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text
+      }
+    });
   });
 
   child.stderr.on("data", (chunk) => {

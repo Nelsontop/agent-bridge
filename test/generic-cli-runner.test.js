@@ -54,3 +54,40 @@ test("runGenericCliTask rejects on non-zero exit", async () => {
 
   await assert.rejects(runner.result, /boom/);
 });
+
+test("runGenericCliTask emits streaming events for stdout lines", async () => {
+  const tempDir = makeTempDir("generic-cli-stream-");
+  const scriptPath = path.join(tempDir, "stream.mjs");
+
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "console.log('line-1');",
+      "setTimeout(() => {",
+      "  console.log('line-2');",
+      "}, 30);",
+      "setTimeout(() => {",
+      "  console.log('done');",
+      "}, 60);"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const events = [];
+  const runner = runGenericCliTask([process.execPath, scriptPath], {
+    prompt: "ignored",
+    workspaceDir: tempDir,
+    onEvent(event) {
+      events.push(event);
+    }
+  });
+
+  const result = await runner.result;
+  assert.match(result.finalMessage, /done/);
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((event) => event.item?.text), ["line-1", "line-2", "done"]);
+  for (const event of events) {
+    assert.equal(event.type, "item.completed");
+    assert.equal(event.item?.type, "agent_message");
+  }
+});
