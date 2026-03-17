@@ -43,6 +43,8 @@ const DEFAULTS = {
   maxConcurrentTasks: 1,
   maxQueuedTasksPerChat: 5,
   maxQueuedTasksPerUser: 10,
+  opencodeCommand: "opencode",
+  kimiCliCommand: "kimi",
   maxReplyChars: 1800,
   port: 3000,
   requireMentionInGroup: true
@@ -350,6 +352,14 @@ export function loadConfig(rootDir = process.cwd()) {
     claudeCodeCommand: [
       ...resolveCustomCommand(process.env.CLAUDE_CODE_COMMAND, DEFAULTS.claudeCodeCommand),
       ...asArgs(process.env.CLAUDE_CODE_ADDITIONAL_ARGS)
+    ],
+    opencodeCommand: [
+      ...resolveCustomCommand(process.env.OPENCODE_COMMAND, DEFAULTS.opencodeCommand),
+      ...asArgs(process.env.OPENCODE_ADDITIONAL_ARGS)
+    ],
+    kimiCliCommand: [
+      ...resolveCustomCommand(process.env.KIMI_CLI_COMMAND, DEFAULTS.kimiCliCommand),
+      ...asArgs(process.env.KIMI_CLI_ADDITIONAL_ARGS)
     ],
     codexCommand: resolveCodexCommand(),
     codexWorkspaceDir: workspaceDir,

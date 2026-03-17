@@ -3,9 +3,11 @@
 ## 变更摘要
 
 - 引入 `core + providers` 分层，解耦任务编排与外部适配。
-- 增加 `CLI_PROVIDER` 配置项（`codex` 与 `claude-code` 可用，其他 provider 以 stub 形式预留）。
+- 增加 `CLI_PROVIDER` 配置项（`codex` / `claude-code` / `opencode` / `kimi-cli` 可用）。
 - 增加 `CHANNEL_PROVIDER` 配置项（V1 默认 `feishu`）。
 - 增加 `CLAUDE_CODE_COMMAND` / `CLAUDE_CODE_ADDITIONAL_ARGS` 配置项。
+- 增加 `OPENCODE_COMMAND` / `OPENCODE_ADDITIONAL_ARGS` 配置项。
+- 增加 `KIMI_CLI_COMMAND` / `KIMI_CLI_ADDITIONAL_ARGS` 配置项。
 - `BridgeService` 通过 `TaskOrchestrator` 调用 CLI provider。
 - 启动入口改为 `FeishuChannelAdapter` 装配飞书 HTTP + WS 能力。
 

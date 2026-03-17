@@ -42,6 +42,10 @@ function baseEnv(rootDir) {
     CODEX_WORKSPACE_DIR: rootDir,
     CLAUDE_CODE_COMMAND: undefined,
     CLAUDE_CODE_ADDITIONAL_ARGS: undefined,
+    OPENCODE_COMMAND: undefined,
+    OPENCODE_ADDITIONAL_ARGS: undefined,
+    KIMI_CLI_COMMAND: undefined,
+    KIMI_CLI_ADDITIONAL_ARGS: undefined,
     CHANNEL_PROVIDER: undefined,
     CLI_PROVIDER: undefined
   };
@@ -135,6 +139,25 @@ test("loadConfig resolves CLAUDE_CODE command and additional args", () => {
     () => {
       const config = loadConfig(rootDir);
       assert.deepEqual(config.claudeCodeCommand, ["claude", "--print", "--json"]);
+    }
+  );
+});
+
+test("loadConfig resolves OPENCODE and KIMI_CLI commands", () => {
+  const rootDir = makeRoot("config-other-cli-command-");
+
+  withEnv(
+    {
+      ...baseEnv(rootDir),
+      OPENCODE_COMMAND: "opencode",
+      OPENCODE_ADDITIONAL_ARGS: "--json",
+      KIMI_CLI_COMMAND: "kimi",
+      KIMI_CLI_ADDITIONAL_ARGS: "chat --stream"
+    },
+    () => {
+      const config = loadConfig(rootDir);
+      assert.deepEqual(config.opencodeCommand, ["opencode", "--json"]);
+      assert.deepEqual(config.kimiCliCommand, ["kimi", "chat", "--stream"]);
     }
   );
 });

@@ -7,7 +7,12 @@ import {
 
 test("builtin CLI provider registry contains all configured providers", () => {
   const registry = createBuiltinCliProviderRegistry(
-    { codexWorkspaceDir: "/tmp/workspace", claudeCodeCommand: ["claude"] },
+    {
+      codexWorkspaceDir: "/tmp/workspace",
+      claudeCodeCommand: ["claude"],
+      opencodeCommand: ["opencode"],
+      kimiCliCommand: ["kimi"]
+    },
     {
       runCodexTask() {
         return {
@@ -27,9 +32,14 @@ test("builtin CLI provider registry contains all configured providers", () => {
   assert.deepEqual(registry.list().sort(), [...SUPPORTED_CLI_PROVIDERS].sort());
 });
 
-test("stub CLI providers fail with explicit not implemented message", () => {
+test("all builtin CLI providers return executable handles", () => {
   const registry = createBuiltinCliProviderRegistry(
-    { codexWorkspaceDir: "/tmp/workspace", claudeCodeCommand: ["claude"] },
+    {
+      codexWorkspaceDir: "/tmp/workspace",
+      claudeCodeCommand: ["claude"],
+      opencodeCommand: ["opencode"],
+      kimiCliCommand: ["kimi"]
+    },
     {
       runCodexTask() {
         return {
@@ -46,8 +56,9 @@ test("stub CLI providers fail with explicit not implemented message", () => {
     }
   );
 
-  for (const name of ["opencode", "kimi-cli"]) {
+  for (const name of ["opencode", "kimi-cli", "claude-code"]) {
     const provider = registry.get(name);
-    assert.throws(() => provider.runTask({ prompt: "hi" }), /pending|unavailable/);
+    const execution = provider.runTask({ prompt: "hi" });
+    assert.equal(typeof execution.cancel, "function");
   }
 });

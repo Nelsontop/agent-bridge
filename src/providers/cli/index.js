@@ -22,8 +22,16 @@ export function registerBuiltinCliProviders(registry, config, dependencies = {})
       runGenericCliTask: dependencies.runGenericCliTask
     })
   );
-  registry.register(createOpencodeProvider());
-  registry.register(createKimiCliProvider());
+  registry.register(
+    createOpencodeProvider(config, {
+      runGenericCliTask: dependencies.runGenericCliTask
+    })
+  );
+  registry.register(
+    createKimiCliProvider(config, {
+      runGenericCliTask: dependencies.runGenericCliTask
+    })
+  );
   return registry;
 }
 

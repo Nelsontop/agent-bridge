@@ -1,9 +1,17 @@
-import { createStubCliProvider } from "./stub-cli-provider.js";
+import { assertCliProvider } from "../../core/cli-provider.js";
+import { runGenericCliTask } from "../../generic-cli-runner.js";
 
-export function createOpencodeProvider() {
-  return createStubCliProvider({
+export function createOpencodeProvider(config, dependencies = {}) {
+  const runTaskImpl = dependencies.runGenericCliTask || runGenericCliTask;
+
+  return assertCliProvider({
     name: "opencode",
-    displayName: "opencode",
-    reason: "CLI protocol adapter is pending"
+    supportsResume: false,
+    runTask(taskOptions) {
+      return runTaskImpl(config.opencodeCommand, {
+        ...taskOptions,
+        supportsResume: false
+      });
+    }
   });
 }
