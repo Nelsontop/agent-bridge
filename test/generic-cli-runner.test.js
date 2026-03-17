@@ -91,3 +91,50 @@ test("runGenericCliTask emits streaming events for stdout lines", async () => {
     assert.equal(event.item?.type, "agent_message");
   }
 });
+
+test("runGenericCliTask uses parseStdoutLine transformed events and final message", async () => {
+  const tempDir = makeTempDir("generic-cli-parser-");
+  const scriptPath = path.join(tempDir, "json-lines.mjs");
+
+  fs.writeFileSync(
+    scriptPath,
+    [
+      "console.log('{\"msg\":\"A\"}');",
+      "console.log('{\"msg\":\"B\"}');"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const events = [];
+  let combined = "";
+  const runner = runGenericCliTask([process.execPath, scriptPath], {
+    prompt: "ignored",
+    workspaceDir: tempDir,
+    onEvent(event) {
+      events.push(event);
+    },
+    parseStdoutLine(line) {
+      const payload = JSON.parse(line);
+      combined += payload.msg;
+      return {
+        sessionId: "stream-session",
+        finalMessage: combined,
+        suppressDefault: true,
+        events: [
+          {
+            type: "item.completed",
+            item: {
+              type: "agent_message",
+              text: combined
+            }
+          }
+        ]
+      };
+    }
+  });
+
+  const result = await runner.result;
+  assert.equal(result.sessionId, "stream-session");
+  assert.equal(result.finalMessage, "AB");
+  assert.deepEqual(events.map((event) => event.item?.text), ["A", "AB"]);
+});

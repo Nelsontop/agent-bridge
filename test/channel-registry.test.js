@@ -33,12 +33,7 @@ test("channel registry resolves supported channel adapters", () => {
     }
   );
   assert.equal(feishuAdapter.name, "feishu");
-
-  const dingtalkAdapter = createChannelAdapter({}, { name: "dingtalk" });
-  const telegramAdapter = createChannelAdapter({}, { name: "telegram" });
-  assert.equal(dingtalkAdapter.name, "dingtalk");
-  assert.equal(telegramAdapter.name, "telegram");
-  assert.deepEqual(SUPPORTED_CHANNEL_ADAPTERS, ["feishu", "dingtalk", "telegram"]);
+  assert.deepEqual(SUPPORTED_CHANNEL_ADAPTERS, ["feishu"]);
 });
 
 test("channel registry rejects unknown channels", () => {

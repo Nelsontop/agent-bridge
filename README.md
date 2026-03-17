@@ -123,8 +123,6 @@ CHANNEL_PROVIDER=feishu
 支持值：
 
 - `feishu`（可用）
-- `dingtalk`（预留）
-- `telegram`（预留）
 
 ## 7. 健康检查与观测
 

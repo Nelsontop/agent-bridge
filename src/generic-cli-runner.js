@@ -6,7 +6,8 @@ export function runGenericCliTask(commandParts, {
   sessionId,
   workspaceDir,
   supportsResume = false,
-  onEvent
+  onEvent,
+  parseStdoutLine
 } = {}) {
   if (!Array.isArray(commandParts) || commandParts.length === 0) {
     throw new Error("Generic CLI command is empty");
@@ -28,18 +29,37 @@ export function runGenericCliTask(commandParts, {
   let stdout = "";
   let stderr = "";
   let resolved = false;
+  let latestSessionId = supportsResume ? sessionId || "" : "";
+  let lastStreamMessage = "";
 
   const stdoutReader = readline.createInterface({ input: child.stdout });
   stdoutReader.on("line", (line) => {
     stdout += `${line}\n`;
+
+    let transformed = null;
+    if (typeof parseStdoutLine === "function") {
+      transformed = parseStdoutLine(line) || null;
+      if (typeof transformed.sessionId === "string" && transformed.sessionId.trim()) {
+        latestSessionId = transformed.sessionId.trim();
+      }
+      if (typeof transformed.finalMessage === "string" && transformed.finalMessage.trim()) {
+        lastStreamMessage = transformed.finalMessage.trim();
+      }
+      if (Array.isArray(transformed.events)) {
+        for (const event of transformed.events) {
+          onEvent?.(event);
+        }
+      }
+      if (transformed.suppressDefault) {
+        return;
+      }
+    }
 
     const text = String(line || "").trim();
     if (!text) {
       return;
     }
 
-    // Emit codex-compatible stream events so BridgeService can reuse
-    // existing progress rendering without provider-specific branching.
     onEvent?.({
       type: "item.completed",
       item: {
@@ -61,8 +81,8 @@ export function runGenericCliTask(commandParts, {
       resolved = true;
       if (code === 0) {
         resolve({
-          sessionId: supportsResume ? sessionId || "" : "",
-          finalMessage: stdout.trim() || stderr.trim() || "Task completed.",
+          sessionId: latestSessionId,
+          finalMessage: lastStreamMessage || stdout.trim() || stderr.trim() || "Task completed.",
           stderr: stderr.trim()
         });
         return;

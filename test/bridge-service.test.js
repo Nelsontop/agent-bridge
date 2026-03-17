@@ -1889,7 +1889,7 @@ test("/status includes channelProvider and cliProvider", async () => {
 test("getHealth reports channelProvider and cliProvider", () => {
   const bridge = new BridgeService(
     createConfig({
-      channelProvider: "telegram",
+      channelProvider: "feishu",
       cliProvider: "kimi-cli"
     }),
     createStore(),
@@ -1897,6 +1897,6 @@ test("getHealth reports channelProvider and cliProvider", () => {
   );
 
   const health = bridge.getHealth();
-  assert.equal(health.channelProvider, "telegram");
+  assert.equal(health.channelProvider, "feishu");
   assert.equal(health.cliProvider, "kimi-cli");
 });

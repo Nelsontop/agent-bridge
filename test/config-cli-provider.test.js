@@ -108,11 +108,11 @@ test("loadConfig validates CHANNEL_PROVIDER", () => {
   withEnv(
     {
       ...baseEnv(rootDir),
-      CHANNEL_PROVIDER: "telegram"
+      CHANNEL_PROVIDER: "feishu"
     },
     () => {
       const config = loadConfig(rootDir);
-      assert.equal(config.channelProvider, "telegram");
+      assert.equal(config.channelProvider, "feishu");
     }
   );
 
