@@ -604,6 +604,10 @@ export class BridgeService {
     return this.config.cliProvider || "codex";
   }
 
+  resolveChannelProviderName() {
+    return this.config.channelProvider || "feishu";
+  }
+
   resolveWorkspaceDir(chatKey, chatId) {
     const conversation = this.store.getConversation(chatKey);
     return (
@@ -1964,6 +1968,8 @@ export class BridgeService {
 
   getHealth() {
     return {
+      channelProvider: this.resolveChannelProviderName(),
+      cliProvider: this.resolveCliProviderName(),
       conversations: this.store.conversationCount(),
       interruptedTasks: this.interruptedTasks.length,
       contextCompactionCount: this.metrics.contextCompactionCount,

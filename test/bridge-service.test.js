@@ -1862,3 +1862,41 @@ test("BridgeService executes tasks through taskOrchestrator when provided", asyn
   assert.equal(calls[0].chatKey, "p2p:oc_test_chat");
   assert.equal(typeof calls[0].taskOptions.prompt, "string");
 });
+
+test("/status includes channelProvider and cliProvider", async () => {
+  const client = createClient();
+  const bridge = new BridgeService(
+    createConfig({
+      channelProvider: "feishu",
+      cliProvider: "codex"
+    }),
+    createStore(),
+    client
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  payload.event.message.content = JSON.stringify({ text: "/status" });
+
+  await bridge.dispatchEvent(payload);
+
+  assert.equal(client.cards.length > 0, true);
+  const statusCard = client.cards[client.cards.length - 1].card;
+  const text = statusCard.elements?.[0]?.text?.content || "";
+  assert.equal(text.includes("channelProvider: feishu"), true);
+  assert.equal(text.includes("cliProvider: codex"), true);
+});
+
+test("getHealth reports channelProvider and cliProvider", () => {
+  const bridge = new BridgeService(
+    createConfig({
+      channelProvider: "telegram",
+      cliProvider: "kimi-cli"
+    }),
+    createStore(),
+    createClient()
+  );
+
+  const health = bridge.getHealth();
+  assert.equal(health.channelProvider, "telegram");
+  assert.equal(health.cliProvider, "kimi-cli");
+});
