@@ -3,7 +3,7 @@ import { loadConfig } from "./config.js";
 import { StateStore } from "./state-store.js";
 import { BridgeService } from "./bridge-service.js";
 import { buildMissingConfigGuide, runSetupWizard } from "./init-guide.js";
-import { createFeishuChannelAdapter } from "./providers/channel/feishu/adapter.js";
+import { createChannelAdapter } from "./providers/channel/index.js";
 import {
   buildSystemdUserService,
   getSystemdUserServicePath,
@@ -60,7 +60,9 @@ async function main() {
   }
 
   const store = new StateStore(config.stateFile);
-  const channelAdapter = createFeishuChannelAdapter(config);
+  const channelAdapter = createChannelAdapter(config, {
+    name: config.channelProvider
+  });
   const bridge = new BridgeService(config, store, channelAdapter);
   channelAdapter.attachBridge(bridge);
 
@@ -70,7 +72,7 @@ async function main() {
         const channelMetrics = channelAdapter.getMetrics();
         sendJson(res, 200, {
           ok: true,
-          transport: "feishu-ws",
+          transport: `${config.channelProvider}-ws`,
           ...bridge.getHealth(),
           feishu: channelMetrics.feishu || null,
           reconnect: channelMetrics.reconnect || null,

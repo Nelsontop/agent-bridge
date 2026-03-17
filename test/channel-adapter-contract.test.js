@@ -5,6 +5,8 @@ import {
   createFeishuChannelAdapter,
   FeishuChannelAdapter
 } from "../src/providers/channel/feishu/adapter.js";
+import { createDingtalkChannelAdapter } from "../src/providers/channel/dingtalk/adapter.js";
+import { createTelegramChannelAdapter } from "../src/providers/channel/telegram/adapter.js";
 
 test("assertChannelAdapter validates contract", () => {
   const adapter = {
@@ -84,4 +86,14 @@ test("createFeishuChannelAdapter returns valid adapter", () => {
   );
 
   assert.equal(adapter.name, "feishu");
+});
+
+test("createDingtalkChannelAdapter and createTelegramChannelAdapter return stub adapters", async () => {
+  const dingtalkAdapter = createDingtalkChannelAdapter();
+  const telegramAdapter = createTelegramChannelAdapter();
+
+  assert.equal(dingtalkAdapter.name, "dingtalk");
+  assert.equal(telegramAdapter.name, "telegram");
+  await assert.rejects(() => dingtalkAdapter.start(), /not implemented/);
+  await assert.rejects(() => telegramAdapter.start(), /not implemented/);
 });

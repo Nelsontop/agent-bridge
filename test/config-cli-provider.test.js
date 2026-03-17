@@ -40,6 +40,7 @@ function baseEnv(rootDir) {
     FEISHU_APP_ID: "cli_test",
     FEISHU_APP_SECRET: "secret_test",
     CODEX_WORKSPACE_DIR: rootDir,
+    CHANNEL_PROVIDER: undefined,
     CLI_PROVIDER: undefined
   };
 }
@@ -65,6 +66,22 @@ test("loadConfig respects CLI_PROVIDER=codex", () => {
   });
 });
 
+test("loadConfig accepts scaffold CLI providers", () => {
+  const rootDir = makeRoot("config-cli-scaffold-");
+  for (const provider of ["claude-code", "opencode", "kimi-cli"]) {
+    withEnv(
+      {
+        ...baseEnv(rootDir),
+        CLI_PROVIDER: provider
+      },
+      () => {
+        const config = loadConfig(rootDir);
+        assert.equal(config.cliProvider, provider);
+      }
+    );
+  }
+});
+
 test("loadConfig rejects unsupported CLI_PROVIDER", () => {
   const rootDir = makeRoot("config-cli-invalid-");
 
@@ -77,4 +94,29 @@ test("loadConfig rejects unsupported CLI_PROVIDER", () => {
       /Unsupported CLI_PROVIDER/
     );
   });
+});
+
+test("loadConfig validates CHANNEL_PROVIDER", () => {
+  const rootDir = makeRoot("config-channel-");
+
+  withEnv(
+    {
+      ...baseEnv(rootDir),
+      CHANNEL_PROVIDER: "telegram"
+    },
+    () => {
+      const config = loadConfig(rootDir);
+      assert.equal(config.channelProvider, "telegram");
+    }
+  );
+
+  withEnv(
+    {
+      ...baseEnv(rootDir),
+      CHANNEL_PROVIDER: "unknown"
+    },
+    () => {
+      assert.throws(() => loadConfig(rootDir), /Unsupported CHANNEL_PROVIDER/);
+    }
+  );
 });

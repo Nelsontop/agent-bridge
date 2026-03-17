@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
 import { createCliProviderRegistry } from "./core/cli-provider.js";
 import { TaskOrchestrator } from "./core/task-orchestrator.js";
-import { createCodexProvider } from "./providers/cli/codex-provider.js";
+import { registerBuiltinCliProviders } from "./providers/cli/index.js";
 import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "./workspace-binding.js";
 import { BridgeCommandRouter } from "./bridge-command-router.js";
 import { markTaskCompleted, markTaskFailed, markTaskRunning } from "./task-lifecycle.js";
@@ -550,11 +550,9 @@ export class BridgeService {
       if (dependencies.cliProvider) {
         providerRegistry.register(dependencies.cliProvider);
       } else {
-        providerRegistry.register(
-          createCodexProvider(this.config, {
-            runCodexTask: this.runCodexTask
-          })
-        );
+        registerBuiltinCliProviders(providerRegistry, this.config, {
+          runCodexTask: this.runCodexTask
+        });
       }
     }
     this.taskOrchestrator =

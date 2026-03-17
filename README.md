@@ -145,6 +145,7 @@ CHAT_WORKSPACE_MAPPINGS=
 
 CODEX_COMMAND=codex
 CLI_PROVIDER=codex
+CHANNEL_PROVIDER=feishu
 CODEX_MODEL=
 CODEX_PROFILE=
 
@@ -165,7 +166,8 @@ AUTO_COMMIT_MESSAGE_PREFIX="bridge: save"
 - `GITHUB_REPO_OWNER`：`/bind` 创建 GitHub 仓库时使用的 owner；不填则使用当前 `gh` 登录用户
 - `CHAT_WORKSPACE_MAPPINGS`：静态聊天目录映射，格式 `chatKey=/abs/path;chat_id=/abs/path`
 - `CODEX_COMMAND`：覆盖默认 `codex` 启动命令，支持带参数
-- `CLI_PROVIDER`：选择当前全局 CLI provider（V1 仅支持 `codex`）
+- `CLI_PROVIDER`：选择当前全局 CLI provider（`codex` 可用；`claude-code` / `opencode` / `kimi-cli` 为预留骨架）
+- `CHANNEL_PROVIDER`：选择当前接入渠道（`feishu` 可用；`dingtalk` / `telegram` 为预留骨架）
 - `CODEX_MODEL` / `CODEX_PROFILE`：需要固定模型或 profile 时再填
 
 ### 可选调优项

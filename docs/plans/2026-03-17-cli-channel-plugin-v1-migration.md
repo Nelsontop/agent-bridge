@@ -3,7 +3,8 @@
 ## 变更摘要
 
 - 引入 `core + providers` 分层，解耦任务编排与外部适配。
-- 增加 `CLI_PROVIDER` 配置项（V1 仅支持 `codex`）。
+- 增加 `CLI_PROVIDER` 配置项（`codex` 可用，其他 provider 以 stub 形式预留）。
+- 增加 `CHANNEL_PROVIDER` 配置项（V1 默认 `feishu`）。
 - `BridgeService` 通过 `TaskOrchestrator` 调用 CLI provider。
 - 启动入口改为 `FeishuChannelAdapter` 装配飞书 HTTP + WS 能力。
 
@@ -13,11 +14,19 @@
 - 新增 `src/core/task-orchestrator.js`
 - 新增 `src/core/channel-adapter.js`
 - 新增 `src/providers/cli/codex-provider.js`
+- 新增 `src/providers/cli/claude-code-provider.js`（stub）
+- 新增 `src/providers/cli/opencode-provider.js`（stub）
+- 新增 `src/providers/cli/kimi-cli-provider.js`（stub）
+- 新增 `src/providers/cli/index.js`
 - 新增 `src/providers/channel/feishu/adapter.js`
+- 新增 `src/providers/channel/dingtalk/adapter.js`（stub）
+- 新增 `src/providers/channel/telegram/adapter.js`（stub）
+- 新增 `src/providers/channel/index.js`
 
 ## 配置兼容性
 
 - `CLI_PROVIDER` 默认为 `codex`。
+- `CHANNEL_PROVIDER` 默认为 `feishu`。
 - 未设置 `CLI_PROVIDER` 时行为与旧版本一致。
 - 设置不支持的 provider 会在启动时报错并退出。
 

@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { SUPPORTED_CHANNEL_ADAPTERS } from "./providers/channel/index.js";
+import { SUPPORTED_CLI_PROVIDERS } from "./providers/cli/index.js";
 
 const DEFAULT_PRELUDE = [
   "你正在通过飞书远程控制 Codex。",
@@ -16,6 +18,7 @@ const DEFAULT_PRELUDE = [
 const DEFAULTS = {
   autoCommitAfterTaskEnabled: false,
   autoCommitMessagePrefix: "bridge: save",
+  channelProvider: "feishu",
   cliProvider: "codex",
   codexApprovalPolicy: "never",
   codexCommand: "codex",
@@ -239,11 +242,19 @@ export function loadConfig(rootDir = process.cwd()) {
     1,
     asNumber(process.env.MAX_CONCURRENT_TASKS, DEFAULTS.maxConcurrentTasks)
   );
-  const cliProvider = (process.env.CLI_PROVIDER || DEFAULTS.cliProvider).trim().toLowerCase();
-  const supportedCliProviders = ["codex"];
-  if (!supportedCliProviders.includes(cliProvider)) {
+  const channelProvider = (
+    process.env.CHANNEL_PROVIDER ||
+    DEFAULTS.channelProvider
+  ).trim().toLowerCase();
+  if (!SUPPORTED_CHANNEL_ADAPTERS.includes(channelProvider)) {
     throw new Error(
-      `Unsupported CLI_PROVIDER: ${cliProvider}. Supported values: ${supportedCliProviders.join(", ")}`
+      `Unsupported CHANNEL_PROVIDER: ${channelProvider}. Supported values: ${SUPPORTED_CHANNEL_ADAPTERS.join(", ")}`
+    );
+  }
+  const cliProvider = (process.env.CLI_PROVIDER || DEFAULTS.cliProvider).trim().toLowerCase();
+  if (!SUPPORTED_CLI_PROVIDERS.includes(cliProvider)) {
+    throw new Error(
+      `Unsupported CLI_PROVIDER: ${cliProvider}. Supported values: ${SUPPORTED_CLI_PROVIDERS.join(", ")}`
     );
   }
 
@@ -323,6 +334,7 @@ export function loadConfig(rootDir = process.cwd()) {
       DEFAULTS.feishuInteractiveCardsEnabled
     ),
     githubRepoOwner: process.env.GITHUB_REPO_OWNER || "",
+    channelProvider,
     cliProvider,
     codexCommand: resolveCodexCommand(),
     codexWorkspaceDir: workspaceDir,
