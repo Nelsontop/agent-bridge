@@ -5,7 +5,7 @@ import { WorkspaceBindingPolicy } from "../src/workspace-policy.js";
 function createConfig(overrides = {}) {
   return {
     codexWorkspaceDir: "/srv/workspaces",
-    workspaceAllowedRoots: ["/srv/workspaces", "/tmp/sandboxes"],
+    workspaceAllowedRoots: ["/srv/workspaces", "/srv/sandboxes"],
     ...overrides
   };
 }
@@ -30,7 +30,7 @@ test("workspace binding policy rejects paths outside allowed roots", () => {
 test("workspace binding policy allows absolute paths under configured roots", () => {
   const policy = new WorkspaceBindingPolicy(createConfig());
 
-  const resolved = policy.resolveAuthorizedWorkspace("/tmp/sandboxes/demo");
+  const resolved = policy.resolveAuthorizedWorkspace("/srv/sandboxes/demo");
 
-  assert.equal(resolved, "/tmp/sandboxes/demo");
+  assert.equal(resolved, "/srv/sandboxes/demo");
 });

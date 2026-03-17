@@ -1,11 +1,20 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BridgeService } from "../src/bridge-service.js";
 
+const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 const FIXTURE_DIR = path.join(process.cwd(), "test", "fixtures");
+
+function testPath(...segments) {
+  return path.join(TEST_TMP_DIR, ...segments);
+}
+
+function makeTempDir(prefix) {
+  fs.mkdirSync(TEST_TMP_DIR, { recursive: true });
+  return fs.mkdtempSync(path.join(TEST_TMP_DIR, prefix));
+}
 
 function loadFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, name), "utf8"));
@@ -75,11 +84,11 @@ function createInteractionMessage({
 function createConfig(overrides = {}) {
   return {
     chatWorkspaceMappings: new Map(),
-    codexWorkspaceDir: "/tmp/codex-workspace",
+    codexWorkspaceDir: testPath("codex-workspace"),
     contextCompactEnabled: false,
     contextCompactThreshold: 0.8,
     contextMemoryLoadFraction: 0.1,
-    contextMemoryDir: path.join(os.tmpdir(), "codex-bridge-memory-default"),
+    contextMemoryDir: testPath("codex-bridge-memory-default"),
     contextWindowFallbackTokens: 128000,
     duplicateTaskWindowMs: 15000,
     feishuAllowedOpenIds: new Set(),
@@ -97,7 +106,7 @@ function createConfig(overrides = {}) {
     maxReplyChars: 200,
     requireMentionInGroup: true,
     taskAckEnabled: true,
-    workspaceAllowedRoots: ["/tmp"],
+    workspaceAllowedRoots: [TEST_TMP_DIR],
     ...overrides
   };
 }
@@ -335,14 +344,14 @@ test("bind command stores the group workspace and later tasks use it", async () 
         remoteStatus: "created",
         remoteUrl: "https://github.com/Nelsontop/group-project",
         repoName: "group-project",
-        workspaceDir: "/tmp/group-project"
+        workspaceDir: testPath("group-project")
       }),
       runCodexTask: runner.runCodexTask.bind(runner)
     }
   );
 
   await bridge.handleCommand({
-    commandText: "/bind /tmp/group-project group-project",
+    commandText: `/bind ${testPath("group-project")} group-project`,
     chatId: "oc_group_workspace",
     chatKey: "group:oc_group_workspace",
     target: {
@@ -353,7 +362,7 @@ test("bind command stores the group workspace and later tasks use it", async () 
 
   assert.equal(
     store.getConversation("group:oc_group_workspace").workspaceDir,
-    "/tmp/group-project"
+    testPath("group-project")
   );
   assert.equal(client.texts.at(-1).text.includes("后续在当前群里启动的 Codex session"), true);
 
@@ -366,7 +375,7 @@ test("bind command stores the group workspace and later tasks use it", async () 
   );
 
   assert.equal(runner.calls.length, 1);
-  assert.equal(runner.calls[0].workspaceDir, "/tmp/group-project");
+  assert.equal(runner.calls[0].workspaceDir, testPath("group-project"));
 
   runner.pending[0].resolve({
     finalMessage: "done",
@@ -382,7 +391,7 @@ test("bind command supports quoted workspace paths", async () => {
     createConfig({
       feishuInteractiveCardsEnabled: false,
       requireMentionInGroup: false,
-      workspaceAllowedRoots: ["/tmp"]
+      workspaceAllowedRoots: [TEST_TMP_DIR]
     }),
     store,
     client,
@@ -399,7 +408,7 @@ test("bind command supports quoted workspace paths", async () => {
   );
 
   await bridge.handleCommand({
-    commandText: '/bind "/tmp/Project A" project-a',
+    commandText: `/bind "${testPath("Project A")}" project-a`,
     chatId: "oc_group_workspace_quoted",
     chatKey: "group:oc_group_workspace_quoted",
     target: {
@@ -410,7 +419,7 @@ test("bind command supports quoted workspace paths", async () => {
 
   assert.equal(
     store.getConversation("group:oc_group_workspace_quoted").workspaceDir,
-    "/tmp/Project A"
+    testPath("Project A")
   );
 });
 
@@ -425,7 +434,7 @@ test("bind command rejects workspaces outside allowed roots", async () => {
     client,
     {
       prepareWorkspaceBinding: async () => {
-        throw new Error("工作目录不在允许范围内：/etc。允许范围：/tmp");
+        throw new Error(`工作目录不在允许范围内：/etc。允许范围：${TEST_TMP_DIR}`);
       }
     }
   );
@@ -442,7 +451,7 @@ test("bind command rejects workspaces outside allowed roots", async () => {
 
   assert.equal(
     client.texts.at(-1).text,
-    "工作目录绑定失败：工作目录不在允许范围内：/etc。允许范围：/tmp"
+    `工作目录绑定失败：工作目录不在允许范围内：/etc。允许范围：${TEST_TMP_DIR}`
   );
 });
 
@@ -452,10 +461,10 @@ test("reset clears the session but preserves the bound workspace", async () => {
     conversations: {
       "group:oc_group_reset": {
         bindingStatus: "bound",
-        memoryFilePath: "/tmp/memory.md",
+        memoryFilePath: testPath("memory.md"),
         repoRemoteUrl: "https://github.com/Nelsontop/group-reset",
         sessionId: "thread_reset",
-        workspaceDir: "/tmp/group-reset"
+        workspaceDir: testPath("group-reset")
       }
     }
   });
@@ -476,7 +485,7 @@ test("reset clears the session but preserves the bound workspace", async () => {
   });
 
   const conversation = store.getConversation("group:oc_group_reset");
-  assert.equal(conversation.workspaceDir, "/tmp/group-reset");
+  assert.equal(conversation.workspaceDir, testPath("group-reset"));
   assert.equal(conversation.sessionId, "");
   assert.equal(conversation.memoryFilePath, "");
   assert.equal(client.texts.at(-1).text.includes("工作目录绑定保留"), true);
@@ -492,12 +501,12 @@ test("different bound groups run on independent agents even when per-group concu
         "group:group-a": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-a"
+          workspaceDir: testPath("group-a")
         },
         "group:group-b": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-b"
+          workspaceDir: testPath("group-b")
         }
       }
     }),
@@ -525,8 +534,8 @@ test("different bound groups run on independent agents even when per-group concu
 
   assert.equal(runner.calls.length, 2);
   assert.equal(bridge.running.size, 2);
-  assert.equal(runner.calls[0].workspaceDir, "/tmp/group-a");
-  assert.equal(runner.calls[1].workspaceDir, "/tmp/group-b");
+  assert.equal(runner.calls[0].workspaceDir, testPath("group-a"));
+  assert.equal(runner.calls[1].workspaceDir, testPath("group-b"));
 
   runner.pending[0].resolve({
     finalMessage: "done a",
@@ -554,12 +563,12 @@ test("same user pending limits are scoped to the current group", async () => {
         "group:group-a": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-a"
+          workspaceDir: testPath("group-a")
         },
         "group:group-b": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-b"
+          workspaceDir: testPath("group-b")
         }
       }
     }),
@@ -613,12 +622,12 @@ test("queue position is counted independently per group", async () => {
         "group:group-a": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-a"
+          workspaceDir: testPath("group-a")
         },
         "group:group-b": {
           bindingStatus: "bound",
           sessionId: "",
-          workspaceDir: "/tmp/group-b"
+          workspaceDir: testPath("group-b")
         }
       }
     }),
@@ -813,7 +822,7 @@ test("real message event creates a shared card and resumes the existing session"
     conversations: {
       "p2p:oc_test_chat": {
         sessionId: "thread_existing",
-        workspaceDir: "/tmp/codex-workspace"
+        workspaceDir: testPath("codex-workspace")
       }
     }
   });
@@ -854,7 +863,7 @@ test("flattened WS message event creates a task and resumes the existing session
     conversations: {
       "p2p:oc_test_chat": {
         sessionId: "thread_existing",
-        workspaceDir: "/tmp/codex-workspace"
+        workspaceDir: testPath("codex-workspace")
       }
     }
   });
@@ -1338,7 +1347,7 @@ test("resumeRecoveredTasks restores queued snapshots and surfaces interrupted ta
               chatId: "oc_test_chat",
               replyToMessageId: "om_source_message_4"
             },
-            workspaceDir: "/tmp/codex-workspace"
+            workspaceDir: testPath("codex-workspace")
           }
         ],
         nextTaskNumber: 6,
@@ -1355,7 +1364,7 @@ test("resumeRecoveredTasks restores queued snapshots and surfaces interrupted ta
               chatId: "oc_test_chat",
               replyToMessageId: "om_source_message_5"
             },
-            workspaceDir: "/tmp/codex-workspace"
+            workspaceDir: testPath("codex-workspace")
           }
         ],
         running: []
@@ -1401,7 +1410,7 @@ test("retry command retries the latest interrupted task in the current chat", as
               chatId: "oc_test_chat",
               replyToMessageId: "om_source_message_6"
             },
-            workspaceDir: "/tmp/codex-workspace"
+            workspaceDir: testPath("codex-workspace")
           }
         ],
         nextTaskNumber: 7,
@@ -1531,7 +1540,7 @@ test("card action can retry an interrupted task", async () => {
               chatId: "oc_test_chat",
               replyToMessageId: "om_source_message_8"
             },
-            workspaceDir: "/tmp/codex-workspace"
+            workspaceDir: testPath("codex-workspace")
           }
         ],
         nextTaskNumber: 9,
@@ -1594,7 +1603,7 @@ test("dispatchEvent rejects tasks when the chat queue limit is reached", async (
 });
 
 test("context compaction writes memory to disk and uses it in the next fresh session", async () => {
-  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-"));
+  const memoryDir = makeTempDir("codex-bridge-memory-");
   const client = createClient();
   const calls = [];
   const runCodexTask = (_config, args) => {
@@ -1680,7 +1689,7 @@ test("context compaction writes memory to disk and uses it in the next fresh ses
 });
 
 test("loaded memory is trimmed to at most ten percent of the context budget", async () => {
-  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-limit-"));
+  const memoryDir = makeTempDir("codex-bridge-memory-limit-");
   const memoryFilePath = path.join(memoryDir, "memory.md");
   const largeMemory = "记忆".repeat(300);
   fs.writeFileSync(memoryFilePath, largeMemory, "utf8");
@@ -1699,7 +1708,7 @@ test("loaded memory is trimmed to at most ten percent of the context budget", as
           lastModelContextWindow: 1000,
           memoryFilePath,
           sessionId: "",
-          workspaceDir: "/tmp/codex-workspace"
+          workspaceDir: testPath("codex-workspace")
         }
       }
     }),
@@ -1728,7 +1737,7 @@ test("loaded memory is trimmed to at most ten percent of the context budget", as
 });
 
 test("nested token_count event updates context usage and triggers compaction", async () => {
-  const memoryDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-memory-nested-"));
+  const memoryDir = makeTempDir("codex-bridge-memory-nested-");
   const calls = [];
   const bridge = new BridgeService(
     createConfig({

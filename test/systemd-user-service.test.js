@@ -4,15 +4,15 @@ import { buildSystemdUserService } from "../src/systemd-user-service.js";
 
 test("buildSystemdUserService renders a restartable user service", () => {
   const service = buildSystemdUserService({
-    rootDir: "/tmp/codex-bridge",
+    rootDir: "/workspace/codex-bridge",
     nodePath: "/usr/bin/node",
     pathEnv: "/usr/local/bin:/usr/bin"
   });
 
   assert.equal(service.includes("Description=Codex Feishu Bridge"), true);
-  assert.equal(service.includes("WorkingDirectory=/tmp/codex-bridge"), true);
+  assert.equal(service.includes("WorkingDirectory=/workspace/codex-bridge"), true);
   assert.equal(
-    service.includes('ExecStart="/usr/bin/node" "/tmp/codex-bridge/src/index.js"'),
+    service.includes('ExecStart="/usr/bin/node" "/workspace/codex-bridge/src/index.js"'),
     true
   );
   assert.equal(

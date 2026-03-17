@@ -32,13 +32,14 @@ function createTask(overrides = {}) {
 }
 
 test("markTaskQueuedForRetry resets execution state and keeps workspace fallback", () => {
+  const retryWorkspace = "/workspace/retry-workspace";
   const task = createTask({ recovered: false });
 
-  markTaskQueuedForRetry(task, "/tmp/retry-workspace");
+  markTaskQueuedForRetry(task, retryWorkspace);
 
   assert.equal(task.status, TASK_STATUS.QUEUED);
   assert.equal(task.recovered, true);
-  assert.equal(task.workspaceDir, "/tmp/retry-workspace");
+  assert.equal(task.workspaceDir, retryWorkspace);
   assert.equal(task.lastProgressText, "任务已从中断状态重新入队。");
   assert.equal(task.sessionId, "thread_old");
   assert.equal(task.autoCommitSummary, "");

@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,6 +7,13 @@ import {
   autoCommitWorkspace,
   rollbackAutoCommitWorkspace
 } from "../src/git-commit.js";
+
+const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
+
+function makeTempDir(prefix) {
+  fs.mkdirSync(TEST_TMP_DIR, { recursive: true });
+  return fs.mkdtempSync(path.join(TEST_TMP_DIR, prefix));
+}
 
 function runGit(args, cwd) {
   const result = spawnSync("git", args, {
@@ -25,7 +31,7 @@ function runGit(args, cwd) {
 }
 
 test("rollbackAutoCommitWorkspace removes the task auto commit and keeps changes", async () => {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bridge-git-"));
+  const repoDir = makeTempDir("codex-bridge-git-");
   const filePath = path.join(repoDir, "note.txt");
   fs.writeFileSync(filePath, "base\n", "utf8");
 

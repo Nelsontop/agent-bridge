@@ -1,9 +1,15 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCodexTask } from "../src/codex-runner.js";
+
+const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
+
+function makeTempDir(prefix) {
+  fs.mkdirSync(TEST_TMP_DIR, { recursive: true });
+  return fs.mkdtempSync(path.join(TEST_TMP_DIR, prefix));
+}
 
 async function waitFor(check, timeoutMs = 8000) {
   const startedAt = Date.now();
@@ -18,7 +24,7 @@ async function waitFor(check, timeoutMs = 8000) {
 }
 
 test("runCodexTask cancel terminates descendants even if they escape the parent process group", async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-"));
+  const tempDir = makeTempDir("codex-runner-");
   const parentScript = path.join(tempDir, "parent.mjs");
   const childScript = path.join(tempDir, "child.mjs");
   const childPidFile = path.join(tempDir, "child.pid");
@@ -121,7 +127,7 @@ test("runCodexTask cancel terminates descendants even if they escape the parent 
 });
 
 test("runCodexTask includes prelude only for fresh sessions", async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-runner-prompt-"));
+  const tempDir = makeTempDir("codex-runner-prompt-");
   const scriptPath = path.join(tempDir, "echo-args.mjs");
 
   fs.writeFileSync(
