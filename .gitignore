@@ -8,3 +8,6 @@ dist
 .tmp-test
 TODO.md
 todo.md
+.gstack
+.repo-scan
+docs
