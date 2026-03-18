@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WorkspaceBindingPolicy } from "../src/workspace-policy.js";
+import { WorkspaceBindingPolicy } from "../src/domain/workspace-policy.js";
 
 function createConfig(overrides = {}) {
   return {

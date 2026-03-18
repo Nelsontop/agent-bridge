@@ -1,16 +1,16 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { StateStore } from "./state-store.js";
-import { FeishuClient } from "./feishu-client.js";
-import { BridgeService } from "./bridge-service.js";
-import { FeishuWsClient } from "./feishu-ws-client.js";
-import { buildMissingConfigGuide, runSetupWizard } from "./init-guide.js";
+import { StateStore } from "./infrastructure/state/state-store.js";
+import { BridgeService } from "./application/bridge-service.js";
+import { buildHealthPayload } from "./application/health-payload.js";
+import { buildMissingConfigGuide, runSetupWizard } from "./application/init-guide.js";
+import { createChannelAdapter } from "./providers/channel/index.js";
 import {
   buildSystemdUserService,
   getSystemdUserServicePath,
   installSystemdUserService,
   removeSystemdUserService
-} from "./systemd-user-service.js";
+} from "./infrastructure/system/systemd-user-service.js";
 
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
@@ -61,21 +61,16 @@ async function main() {
   }
 
   const store = new StateStore(config.stateFile);
-  const feishuClient = new FeishuClient(config);
-  const bridge = new BridgeService(config, store, feishuClient);
-  const wsClient = new FeishuWsClient(config, bridge);
+  const channelAdapter = createChannelAdapter(config, {
+    name: config.channelProvider
+  });
+  const bridge = new BridgeService(config, store, channelAdapter);
+  channelAdapter.attachBridge(bridge);
 
   if (config.enableHealthServer) {
     const server = http.createServer((req, res) => {
       if (req.method === "GET" && req.url === "/healthz") {
-        sendJson(res, 200, {
-          ok: true,
-          transport: "feishu-ws",
-          ...bridge.getHealth(),
-          feishu: feishuClient.getMetrics(),
-          reconnect: wsClient.getReconnectInfo(),
-          ws: wsClient.getMetrics()
-        });
+        sendJson(res, 200, buildHealthPayload({ bridge, channelAdapter }));
         return;
       }
 
@@ -87,10 +82,10 @@ async function main() {
     });
   }
 
-  await wsClient.start();
+  await channelAdapter.start();
   await bridge.resumeRecoveredTasks();
   console.log(
-    `[ws] feishu persistent connection started, working in ${config.codexWorkspaceDir}`
+    `[channel] ${config.channelProvider} adapter started, working in ${config.codexWorkspaceDir}`
   );
 }
 

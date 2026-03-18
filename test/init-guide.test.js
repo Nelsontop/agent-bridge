@@ -5,7 +5,7 @@ import {
   buildMissingConfigGuide,
   buildSetupChecklist,
   parseEnvText
-} from "../src/init-guide.js";
+} from "../src/application/init-guide.js";
 
 const TEST_PROJECT_DIR = "/workspace/project";
 

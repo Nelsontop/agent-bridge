@@ -1,0 +1,109 @@
+import { spawn } from "node:child_process";
+import readline from "node:readline";
+
+export function runGenericCliTask(commandParts, {
+  prompt,
+  sessionId,
+  workspaceDir,
+  supportsResume = false,
+  onEvent,
+  parseStdoutLine
+} = {}) {
+  if (!Array.isArray(commandParts) || commandParts.length === 0) {
+    throw new Error("Generic CLI command is empty");
+  }
+
+  const [command, ...baseArgs] = commandParts;
+  const args = [...baseArgs];
+  if (supportsResume && sessionId) {
+    args.push("resume", sessionId);
+  }
+  args.push(String(prompt || ""));
+
+  const child = spawn(command, args, {
+    cwd: workspaceDir || process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  let stdout = "";
+  let stderr = "";
+  let resolved = false;
+  let latestSessionId = supportsResume ? sessionId || "" : "";
+  let lastStreamMessage = "";
+
+  const stdoutReader = readline.createInterface({ input: child.stdout });
+  stdoutReader.on("line", (line) => {
+    stdout += `${line}\n`;
+
+    let transformed = null;
+    if (typeof parseStdoutLine === "function") {
+      transformed = parseStdoutLine(line) || null;
+      if (typeof transformed.sessionId === "string" && transformed.sessionId.trim()) {
+        latestSessionId = transformed.sessionId.trim();
+      }
+      if (typeof transformed.finalMessage === "string" && transformed.finalMessage.trim()) {
+        lastStreamMessage = transformed.finalMessage.trim();
+      }
+      if (Array.isArray(transformed.events)) {
+        for (const event of transformed.events) {
+          onEvent?.(event);
+        }
+      }
+      if (transformed.suppressDefault) {
+        return;
+      }
+    }
+
+    const text = String(line || "").trim();
+    if (!text) {
+      return;
+    }
+
+    onEvent?.({
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text
+      }
+    });
+  });
+
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+
+  const result = new Promise((resolve, reject) => {
+    child.once("error", (error) => {
+      reject(error);
+    });
+    child.once("close", (code) => {
+      resolved = true;
+      if (code === 0) {
+        resolve({
+          sessionId: latestSessionId,
+          finalMessage: lastStreamMessage || stdout.trim() || stderr.trim() || "Task completed.",
+          stderr: stderr.trim()
+        });
+        return;
+      }
+
+      reject(new Error(stderr.trim() || stdout.trim() || `command exited with code ${code}`));
+    });
+  });
+
+  return {
+    cancel() {
+      if (resolved) {
+        return;
+      }
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!resolved) {
+          child.kill("SIGKILL");
+        }
+      }, 2000);
+    },
+    result
+  };
+}

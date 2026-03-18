@@ -1,15 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { runCodexTask as defaultRunCodexTask } from "./codex-runner.js";
-import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "./workspace-binding.js";
+import { runCodexTask as defaultRunCodexTask } from "../infrastructure/cli/codex-runner.js";
+import { createCliProviderRegistry } from "../core/cli-provider.js";
+import { TaskOrchestrator } from "../core/task-orchestrator.js";
+import { registerBuiltinCliProviders } from "../providers/cli/index.js";
+import { prepareWorkspaceBinding as defaultPrepareWorkspaceBinding } from "../infrastructure/workspace/workspace-binding.js";
 import { BridgeCommandRouter } from "./bridge-command-router.js";
 import { markTaskCompleted, markTaskFailed, markTaskRunning } from "./task-lifecycle.js";
 import { TaskRuntime } from "./task-runtime.js";
 import {
   autoCommitWorkspace as defaultAutoCommitWorkspace,
   rollbackAutoCommitWorkspace as defaultRollbackAutoCommitWorkspace
-} from "./git-commit.js";
+} from "../infrastructure/git/git-commit.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -537,11 +540,27 @@ function taskStatusLabel(status) {
 }
 
 export class BridgeService {
-  constructor(config, store, feishuClient, dependencies = {}) {
+  constructor(config, store, channelAdapter, dependencies = {}) {
     this.config = config;
     this.store = store;
-    this.feishuClient = feishuClient;
+    this.channelAdapter = channelAdapter;
     this.runCodexTask = dependencies.runCodexTask || defaultRunCodexTask;
+    const providerRegistry = dependencies.cliProviderRegistry || createCliProviderRegistry();
+    if (providerRegistry.list().length === 0) {
+      if (dependencies.cliProvider) {
+        providerRegistry.register(dependencies.cliProvider);
+      } else {
+        registerBuiltinCliProviders(providerRegistry, this.config, {
+          runCodexTask: this.runCodexTask
+        });
+      }
+    }
+    this.taskOrchestrator =
+      dependencies.taskOrchestrator ||
+      new TaskOrchestrator({
+        providerRegistry,
+        resolveProviderName: () => this.resolveCliProviderName()
+      });
     this.prepareWorkspaceBinding =
       dependencies.prepareWorkspaceBinding || defaultPrepareWorkspaceBinding;
     this.autoCommitWorkspace =
@@ -579,6 +598,28 @@ export class BridgeService {
     this.interruptedTasks = this.runtime.interruptedTasks;
     this.metrics.recoveredQueuedCount = this.queue.length;
     this.metrics.recoveredInterruptedCount = this.interruptedTasks.length;
+  }
+
+  resolveCliProviderName(_chatKey = "") {
+    return this.config.cliProvider || "codex";
+  }
+
+  resolveChannelProviderName() {
+    return this.config.channelProvider || "feishu";
+  }
+
+  resolveTaskProvider(chatKey = "") {
+    const fallbackName = this.resolveCliProviderName(chatKey);
+    if (typeof this.taskOrchestrator?.resolveProvider === "function") {
+      const resolved = this.taskOrchestrator.resolveProvider(chatKey);
+      if (resolved && typeof resolved === "object") {
+        return resolved;
+      }
+    }
+    return {
+      name: fallbackName,
+      supportsResume: fallbackName === "codex"
+    };
   }
 
   resolveWorkspaceDir(chatKey, chatId) {
@@ -640,6 +681,9 @@ export class BridgeService {
   }
 
   async registerPendingInteraction(task, result, interactionRequest) {
+    const interactionSessionId = task.providerSupportsResume
+      ? result.sessionId || task.sessionId || ""
+      : "";
     const interaction = {
       id: crypto.randomUUID(),
       chatId: task.target.chatId,
@@ -650,7 +694,7 @@ export class BridgeService {
       replyToMessageId: task.target.replyToMessageId || "",
       senderOpenId: task.senderOpenId,
       selectedOptionId: "",
-      sessionId: result.sessionId || task.sessionId || "",
+      sessionId: interactionSessionId,
       sourceTaskId: task.id,
       sourceTaskName: buildTaskName(task),
       workspaceDir: task.workspaceDir
@@ -662,7 +706,7 @@ export class BridgeService {
       lastSenderOpenId: task.senderOpenId,
       lastTaskId: task.id,
       pendingInteraction: interaction,
-      sessionId: result.sessionId || "",
+      sessionId: interactionSessionId,
       workspaceDir: task.workspaceDir
     });
 
@@ -695,6 +739,8 @@ export class BridgeService {
       modelContextWindow: 0,
       nameSummary: nameSummary || summarizeTaskPrompt(prompt),
       prompt,
+      providerName: "",
+      providerSupportsResume: true,
       recovered: false,
       senderOpenId,
       sessionId,
@@ -821,6 +867,15 @@ export class BridgeService {
   }
 
   async compactConversationContext(task, sessionId) {
+    if (!task.providerSupportsResume) {
+      this.metrics.lastCompactionDecision = "unsupported-provider";
+      this.metrics.lastCompactionTaskId = task.id;
+      this.metrics.lastCompactionUpdatedAt = new Date().toISOString();
+      return {
+        performed: false,
+        reason: "provider-no-resume"
+      };
+    }
     if (!this.config.contextCompactEnabled || !sessionId) {
       this.metrics.lastCompactionDecision = "skipped";
       this.metrics.lastCompactionTaskId = task.id;
@@ -851,10 +906,13 @@ export class BridgeService {
       `4. 控制长度在约 ${this.getMemoryTokenBudget(task.modelContextWindow)} tokens 以内。`,
       "5. 只输出记忆正文，不要寒暄，不要解释。"
     ].join("\n");
-    const summaryRunner = this.runCodexTask(this.config, {
+    const summaryRunner = this.taskOrchestrator.runTask({
+      chatKey: task.chatKey,
+      taskOptions: {
       prompt: summaryPrompt,
       sessionId,
       workspaceDir: task.workspaceDir
+      }
     });
     const summaryResult = await summaryRunner.result;
     const memoryText = this.trimMemoryToBudget(
@@ -1431,6 +1489,8 @@ export class BridgeService {
 
   buildTaskCard(task) {
     const taskName = buildTaskName(task);
+    const streamMode = (this.config.feishuStreamMode || "card").toLowerCase();
+    const includeNarrativeSections = streamMode === "card";
     const bodyLines = [
       `**任务**：\`${taskName}\``,
       `**状态**：${taskStatusLabel(task.status)}`,
@@ -1453,12 +1513,12 @@ export class BridgeService {
     if (task.startedAt) {
       bodyLines.push(`**开始时间**：${task.startedAt}`);
     }
-    if (task.lastProgressText) {
+    if (includeNarrativeSections && task.lastProgressText) {
       bodyLines.push(
         `**最近更新**：\n${truncateText(task.lastProgressText, this.config.maxReplyChars)}`
       );
     }
-    if (task.finalMessage) {
+    if (includeNarrativeSections && task.finalMessage) {
       bodyLines.push(
         `**结果摘要**：\n${truncateText(task.finalMessage, this.config.maxReplyChars)}`
       );
@@ -1539,7 +1599,7 @@ export class BridgeService {
     const card = this.buildTaskCard(task);
     if (task.cardMessageId) {
       try {
-        await this.feishuClient.updateCard(task.cardMessageId, card);
+        await this.channelAdapter.updateCard(task.cardMessageId, card);
         return;
       } catch (error) {
         console.error(`[task:${task.id}] update card failed:`, error);
@@ -1547,7 +1607,7 @@ export class BridgeService {
     }
 
     try {
-      const payload = await this.feishuClient.sendCard(task.target.chatId, card, {
+      const payload = await this.channelAdapter.sendCard(task.target.chatId, card, {
         replyToMessageId: task.target.replyToMessageId
       });
       const messageId = payload?.data?.message_id || payload?.data?.message?.message_id || "";
@@ -1628,13 +1688,20 @@ export class BridgeService {
           await sleep(waitMs);
         }
 
-        if (this.config.feishuInteractiveCardsEnabled) {
+        const streamMode = (this.config.feishuStreamMode || "card").toLowerCase();
+        const streamToCard =
+          this.config.feishuInteractiveCardsEnabled &&
+          (streamMode === "card" || streamMode === "hybrid");
+        const streamToText =
+          !this.config.feishuInteractiveCardsEnabled ||
+          streamMode === "text" ||
+          streamMode === "hybrid";
+
+        if (streamToCard) {
           await this.syncTaskCard(task);
-        } else {
-          const chunks = splitText(normalized, this.config.maxReplyChars);
-          for (const chunk of chunks) {
-            await this.safeSend(task.target, chunk);
-          }
+        }
+        if (streamToText) {
+          await this.safeSend(task.target, normalized);
         }
         task.lastStreamSentAt = Date.now();
         this.persistRuntime();
@@ -1775,17 +1842,28 @@ export class BridgeService {
   async runTask(task) {
     markTaskRunning(task);
 
+    const taskProvider = this.resolveTaskProvider(task.chatKey);
+    const providerSupportsResume =
+      typeof taskProvider.supportsResume === "boolean"
+        ? taskProvider.supportsResume
+        : taskProvider.name === "codex";
+    task.providerName = taskProvider.name || this.resolveCliProviderName(task.chatKey);
+    task.providerSupportsResume = providerSupportsResume;
     const conversation = this.store.getConversation(task.chatKey);
-    const sessionId =
+    const previousSessionId =
       task.sessionId ||
       (conversation?.workspaceDir === task.workspaceDir ? conversation?.sessionId || null : null);
-    const runner = this.runCodexTask(this.config, {
+    const sessionId = providerSupportsResume ? previousSessionId : "";
+    const runner = this.taskOrchestrator.runTask({
+      chatKey: task.chatKey,
+      taskOptions: {
       onEvent: (event) => {
         this.handleRunnerEvent(task, event);
       },
       prompt: this.buildPromptWithMemory(task.prompt, conversation, task.workspaceDir),
       sessionId,
       workspaceDir: task.workspaceDir
+      }
     });
 
     task.runner = runner;
@@ -1832,7 +1910,7 @@ export class BridgeService {
         lastSenderOpenId: task.senderOpenId,
         lastTaskId: task.id,
         pendingInteraction: null,
-        sessionId: result.sessionId,
+        sessionId: providerSupportsResume ? result.sessionId : "",
         workspaceDir: task.workspaceDir
       });
 
@@ -1840,7 +1918,12 @@ export class BridgeService {
       autoCommitResult = await this.autoCommitWorkspace(this.config, task);
       task.autoCommitSummary = this.formatAutoCommitResult(autoCommitResult);
       let compacted = false;
-      if (result.sessionId) {
+      if (!providerSupportsResume && result.sessionId && this.config.contextCompactEnabled) {
+        this.metrics.lastCompactionDecision = "unsupported-provider";
+        this.metrics.lastCompactionTaskId = task.id;
+        this.metrics.lastCompactionUpdatedAt = new Date().toISOString();
+      }
+      if (providerSupportsResume && result.sessionId) {
         try {
           this.ensureTaskNotAborted(task);
           const compactResult = await this.compactConversationContext(task, result.sessionId);
@@ -1908,7 +1991,7 @@ export class BridgeService {
       const chunks = splitText(text, this.config.maxReplyChars);
       let payload = null;
       for (const chunk of chunks) {
-        payload = await this.feishuClient.sendText(target.chatId, chunk, {
+        payload = await this.channelAdapter.sendText(target.chatId, chunk, {
           replyToMessageId: target.replyToMessageId
         });
       }
@@ -1924,7 +2007,7 @@ export class BridgeService {
       return null;
     }
     try {
-      return await this.feishuClient.sendCard(target.chatId, card, {
+      return await this.channelAdapter.sendCard(target.chatId, card, {
         replyToMessageId: target.replyToMessageId
       });
     } catch (error) {
@@ -1935,6 +2018,8 @@ export class BridgeService {
 
   getHealth() {
     return {
+      channelProvider: this.resolveChannelProviderName(),
+      cliProvider: this.resolveCliProviderName(),
       conversations: this.store.conversationCount(),
       interruptedTasks: this.interruptedTasks.length,
       contextCompactionCount: this.metrics.contextCompactionCount,

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BridgeService } from "../src/bridge-service.js";
+import { BridgeService } from "../src/application/bridge-service.js";
 
 const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 const FIXTURE_DIR = path.join(process.cwd(), "test", "fixtures");
@@ -96,6 +96,7 @@ function createConfig(overrides = {}) {
     feishuInteractiveCardsEnabled: true,
     feishuReplyToMessageEnabled: true,
     feishuStreamCommandStatusEnabled: true,
+    feishuStreamMode: "hybrid",
     feishuStreamOutputEnabled: true,
     feishuStreamUpdateMinIntervalMs: 0,
     githubRepoOwner: "",
@@ -918,9 +919,11 @@ test("streaming agent messages are shown as user-facing progress text", async ()
   });
 
   await waitFor(() =>
-    client.cardUpdates.some((update) =>
-      update.card.elements[0].text.content.includes("正在检查流式配置，并准备给出结论。")
-    )
+    client.texts.some((item) => item.text.includes("正在检查流式配置，并准备给出结论。"))
+  );
+  assert.equal(
+    client.texts.some((item) => item.text.includes("正在检查流式配置，并准备给出结论。")),
+    true
   );
 });
 
@@ -945,14 +948,18 @@ test("streaming command updates are summarized instead of showing raw shell", as
     item: {
       id: "item_command_progress",
       type: "command_execution",
-      command: "/bin/bash -lc \"sed -n '1,160p' src/bridge-service.js\""
+      command: "/bin/bash -lc \"sed -n '1,160p' src/application/bridge-service.js\""
     }
   });
 
   await waitFor(() =>
-    client.cardUpdates.some((update) =>
-      update.card.elements[0].text.content.includes("正在查看文件内容：src/bridge-service.js")
-    )
+    client.texts.some((item) => item.text.includes("正在查看文件内容：src/application/bridge-service.js"))
+  );
+  assert.equal(
+    client.texts.some((item) =>
+      item.text.includes("正在查看文件内容：src/application/bridge-service.js")
+    ),
+    true
   );
   assert.equal(
     client.cardUpdates.some((update) =>
@@ -1830,4 +1837,169 @@ test("task title summary extracts intent instead of truncating raw text", async 
     sessionId: "thread_title"
   });
   await waitFor(() => bridge.running.size === 0);
+});
+
+test("BridgeService executes tasks through taskOrchestrator when provided", async () => {
+  const client = createClient();
+  const calls = [];
+  const bridge = new BridgeService(
+    createConfig(),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      taskOrchestrator: {
+        runTask({ chatKey, taskOptions }) {
+          calls.push({ chatKey, taskOptions });
+          return {
+            cancel() {},
+            result: Promise.resolve({
+              finalMessage: "done",
+              sessionId: "thread_from_orchestrator"
+            })
+          };
+        }
+      }
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  assert.equal(calls[0].chatKey, "p2p:oc_test_chat");
+  assert.equal(typeof calls[0].taskOptions.prompt, "string");
+});
+
+test("non-resume provider does not forward saved session id", async () => {
+  const client = createClient();
+  const config = createConfig({
+    cliProvider: "claude-code"
+  });
+  const chatKey = "p2p:oc_test_chat";
+  const store = createStore({
+    conversations: {
+      [chatKey]: {
+        sessionId: "thread_old",
+        workspaceDir: config.codexWorkspaceDir
+      }
+    }
+  });
+  const calls = [];
+  const bridge = new BridgeService(config, store, client, {
+    autoCommitWorkspace: async () => ({ status: "disabled" }),
+    taskOrchestrator: {
+      resolveProvider() {
+        return {
+          name: "claude-code",
+          supportsResume: false
+        };
+      },
+      runTask({ chatKey, taskOptions }) {
+        calls.push({ chatKey, taskOptions });
+        return {
+          cancel() {},
+          result: Promise.resolve({
+            finalMessage: "done",
+            sessionId: "thread_new"
+          })
+        };
+      }
+    }
+  });
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  assert.equal(calls[0].taskOptions.sessionId, "");
+  assert.equal(store.getConversation(chatKey)?.sessionId || "", "");
+});
+
+test("non-resume provider skips context compaction even when session id is returned", async () => {
+  const client = createClient();
+  const calls = [];
+  const bridge = new BridgeService(
+    createConfig({
+      cliProvider: "opencode",
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.8
+    }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      taskOrchestrator: {
+        resolveProvider() {
+          return {
+            name: "opencode",
+            supportsResume: false
+          };
+        },
+        runTask({ taskOptions }) {
+          calls.push(taskOptions);
+          taskOptions.onEvent?.({
+            type: "token_count",
+            info: {
+              model_context_window: 1000,
+              total_token_usage: {
+                total_tokens: 900
+              }
+            }
+          });
+          return {
+            cancel() {},
+            result: Promise.resolve({
+              finalMessage: "done",
+              sessionId: "session_from_provider"
+            })
+          };
+        }
+      }
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  const health = bridge.getHealth();
+  assert.equal(calls.length, 1);
+  assert.equal(health.lastCompactionDecision, "unsupported-provider");
+  assert.equal(health.contextCompactionCount, 0);
+});
+
+test("/status includes channelProvider and cliProvider", async () => {
+  const client = createClient();
+  const bridge = new BridgeService(
+    createConfig({
+      channelProvider: "feishu",
+      cliProvider: "codex"
+    }),
+    createStore(),
+    client
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  payload.event.message.content = JSON.stringify({ text: "/status" });
+
+  await bridge.dispatchEvent(payload);
+
+  assert.equal(client.cards.length > 0, true);
+  const statusCard = client.cards[client.cards.length - 1].card;
+  const text = statusCard.elements?.[0]?.text?.content || "";
+  assert.equal(text.includes("channelProvider: feishu"), true);
+  assert.equal(text.includes("cliProvider: codex"), true);
+});
+
+test("getHealth reports channelProvider and cliProvider", () => {
+  const bridge = new BridgeService(
+    createConfig({
+      channelProvider: "feishu",
+      cliProvider: "kimi-cli"
+    }),
+    createStore(),
+    createClient()
+  );
+
+  const health = bridge.getHealth();
+  assert.equal(health.channelProvider, "feishu");
+  assert.equal(health.cliProvider, "kimi-cli");
 });

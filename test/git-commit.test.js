@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   autoCommitWorkspace,
   rollbackAutoCommitWorkspace
-} from "../src/git-commit.js";
+} from "../src/infrastructure/git/git-commit.js";
 
 const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 

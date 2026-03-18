@@ -183,6 +183,8 @@ export class BridgeCommandRouter {
         : "私聊默认目录";
       const lines = [
         `chatKey: ${chatKey}`,
+        `channelProvider: ${this.bridge.resolveChannelProviderName()}`,
+        `cliProvider: ${this.bridge.resolveCliProviderName(chatKey)}`,
         `binding: ${bindingState}`,
         `workspace: ${workspaceDir}`,
         `repo: ${conversation?.repoRemoteUrl || "无"}`,

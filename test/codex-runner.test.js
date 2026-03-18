@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runCodexTask } from "../src/codex-runner.js";
+import { runCodexTask } from "../src/infrastructure/cli/codex-runner.js";
 
 const TEST_TMP_DIR = path.join(process.cwd(), ".tmp-test");
 

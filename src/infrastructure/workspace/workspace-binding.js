@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { WorkspaceBindingPolicy } from "./workspace-policy.js";
+import { WorkspaceBindingPolicy } from "../../domain/workspace-policy.js";
 
 function run(command, args, cwd) {
   return new Promise((resolve, reject) => {

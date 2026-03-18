@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { SUPPORTED_CHANNEL_ADAPTERS } from "./providers/channel/index.js";
+import { SUPPORTED_CLI_PROVIDERS } from "./providers/cli/index.js";
 
 const DEFAULT_PRELUDE = [
   "你正在通过飞书远程控制 Codex。",
@@ -16,6 +18,9 @@ const DEFAULT_PRELUDE = [
 const DEFAULTS = {
   autoCommitAfterTaskEnabled: false,
   autoCommitMessagePrefix: "bridge: save",
+  channelProvider: "feishu",
+  claudeCodeCommand: "claude",
+  cliProvider: "codex",
   codexApprovalPolicy: "never",
   codexCommand: "codex",
   codexSandbox: "workspace-write",
@@ -32,12 +37,15 @@ const DEFAULTS = {
   feishuRequestRetryDelayMs: 300,
   feishuRequestTimeoutMs: 10000,
   feishuStreamCommandStatusEnabled: true,
+  feishuStreamMode: "hybrid",
   feishuStreamOutputEnabled: false,
   feishuStreamUpdateMinIntervalMs: 1200,
   host: "127.0.0.1",
   maxConcurrentTasks: 1,
   maxQueuedTasksPerChat: 5,
   maxQueuedTasksPerUser: 10,
+  opencodeCommand: "opencode",
+  kimiCliCommand: "kimi",
   maxReplyChars: 1800,
   port: 3000,
   requireMentionInGroup: true
@@ -208,6 +216,16 @@ function resolveCodexCommand() {
   return [expandHome(DEFAULTS.codexCommand)];
 }
 
+function resolveCustomCommand(value, fallback) {
+  const configuredCommand = value || "";
+  const parsedCommand = splitCommand(configuredCommand);
+  if (parsedCommand.length > 0) {
+    parsedCommand[0] = expandHome(parsedCommand[0]);
+    return parsedCommand;
+  }
+  return [expandHome(fallback)];
+}
+
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -238,6 +256,30 @@ export function loadConfig(rootDir = process.cwd()) {
     1,
     asNumber(process.env.MAX_CONCURRENT_TASKS, DEFAULTS.maxConcurrentTasks)
   );
+  const channelProvider = (
+    process.env.CHANNEL_PROVIDER ||
+    DEFAULTS.channelProvider
+  ).trim().toLowerCase();
+  if (!SUPPORTED_CHANNEL_ADAPTERS.includes(channelProvider)) {
+    throw new Error(
+      `Unsupported CHANNEL_PROVIDER: ${channelProvider}. Supported values: ${SUPPORTED_CHANNEL_ADAPTERS.join(", ")}`
+    );
+  }
+  const cliProvider = (process.env.CLI_PROVIDER || DEFAULTS.cliProvider).trim().toLowerCase();
+  if (!SUPPORTED_CLI_PROVIDERS.includes(cliProvider)) {
+    throw new Error(
+      `Unsupported CLI_PROVIDER: ${cliProvider}. Supported values: ${SUPPORTED_CLI_PROVIDERS.join(", ")}`
+    );
+  }
+  const feishuStreamMode = (
+    process.env.FEISHU_STREAM_MODE ||
+    DEFAULTS.feishuStreamMode
+  ).trim().toLowerCase();
+  if (!["card", "text", "hybrid"].includes(feishuStreamMode)) {
+    throw new Error(
+      `Unsupported FEISHU_STREAM_MODE: ${feishuStreamMode}. Supported values: card, text, hybrid`
+    );
+  }
 
   return {
     rootDir,
@@ -315,6 +357,20 @@ export function loadConfig(rootDir = process.cwd()) {
       DEFAULTS.feishuInteractiveCardsEnabled
     ),
     githubRepoOwner: process.env.GITHUB_REPO_OWNER || "",
+    channelProvider,
+    cliProvider,
+    claudeCodeCommand: [
+      ...resolveCustomCommand(process.env.CLAUDE_CODE_COMMAND, DEFAULTS.claudeCodeCommand),
+      ...asArgs(process.env.CLAUDE_CODE_ADDITIONAL_ARGS)
+    ],
+    opencodeCommand: [
+      ...resolveCustomCommand(process.env.OPENCODE_COMMAND, DEFAULTS.opencodeCommand),
+      ...asArgs(process.env.OPENCODE_ADDITIONAL_ARGS)
+    ],
+    kimiCliCommand: [
+      ...resolveCustomCommand(process.env.KIMI_CLI_COMMAND, DEFAULTS.kimiCliCommand),
+      ...asArgs(process.env.KIMI_CLI_ADDITIONAL_ARGS)
+    ],
     codexCommand: resolveCodexCommand(),
     codexWorkspaceDir: workspaceDir,
     workspaceAllowedRoots:
@@ -345,6 +401,7 @@ export function loadConfig(rootDir = process.cwd()) {
       process.env.FEISHU_STREAM_COMMAND_STATUS_ENABLED,
       DEFAULTS.feishuStreamCommandStatusEnabled
     ),
+    feishuStreamMode,
     feishuStreamUpdateMinIntervalMs: Math.max(
       0,
       asNumber(
