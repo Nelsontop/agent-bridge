@@ -13,6 +13,9 @@ test("assertChannelAdapter validates contract", () => {
     sendText() {},
     sendCard() {},
     updateCard() {},
+    getTransport() {
+      return "demo";
+    },
     getMetrics() {
       return {};
     }
@@ -56,6 +59,7 @@ test("FeishuChannelAdapter exposes messaging methods and metrics", () => {
     reconnect: { retries: 0 },
     ws: { dispatchCount: 2 }
   });
+  assert.equal(adapter.getTransport(), "feishu-ws");
 });
 
 test("createFeishuChannelAdapter returns valid adapter", () => {
@@ -84,4 +88,5 @@ test("createFeishuChannelAdapter returns valid adapter", () => {
   );
 
   assert.equal(adapter.name, "feishu");
+  assert.equal(adapter.getTransport(), "feishu-ws");
 });

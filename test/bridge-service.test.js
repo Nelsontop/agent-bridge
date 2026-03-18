@@ -1870,6 +1870,102 @@ test("BridgeService executes tasks through taskOrchestrator when provided", asyn
   assert.equal(typeof calls[0].taskOptions.prompt, "string");
 });
 
+test("non-resume provider does not forward saved session id", async () => {
+  const client = createClient();
+  const config = createConfig({
+    cliProvider: "claude-code"
+  });
+  const chatKey = "p2p:oc_test_chat";
+  const store = createStore({
+    conversations: {
+      [chatKey]: {
+        sessionId: "thread_old",
+        workspaceDir: config.codexWorkspaceDir
+      }
+    }
+  });
+  const calls = [];
+  const bridge = new BridgeService(config, store, client, {
+    autoCommitWorkspace: async () => ({ status: "disabled" }),
+    taskOrchestrator: {
+      resolveProvider() {
+        return {
+          name: "claude-code",
+          supportsResume: false
+        };
+      },
+      runTask({ chatKey, taskOptions }) {
+        calls.push({ chatKey, taskOptions });
+        return {
+          cancel() {},
+          result: Promise.resolve({
+            finalMessage: "done",
+            sessionId: "thread_new"
+          })
+        };
+      }
+    }
+  });
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  assert.equal(calls[0].taskOptions.sessionId, "");
+  assert.equal(store.getConversation(chatKey)?.sessionId || "", "");
+});
+
+test("non-resume provider skips context compaction even when session id is returned", async () => {
+  const client = createClient();
+  const calls = [];
+  const bridge = new BridgeService(
+    createConfig({
+      cliProvider: "opencode",
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.8
+    }),
+    createStore(),
+    client,
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      taskOrchestrator: {
+        resolveProvider() {
+          return {
+            name: "opencode",
+            supportsResume: false
+          };
+        },
+        runTask({ taskOptions }) {
+          calls.push(taskOptions);
+          taskOptions.onEvent?.({
+            type: "token_count",
+            info: {
+              model_context_window: 1000,
+              total_token_usage: {
+                total_tokens: 900
+              }
+            }
+          });
+          return {
+            cancel() {},
+            result: Promise.resolve({
+              finalMessage: "done",
+              sessionId: "session_from_provider"
+            })
+          };
+        }
+      }
+    }
+  );
+
+  await bridge.dispatchEvent(loadFixture("message.receive_v1.json"));
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  const health = bridge.getHealth();
+  assert.equal(calls.length, 1);
+  assert.equal(health.lastCompactionDecision, "unsupported-provider");
+  assert.equal(health.contextCompactionCount, 0);
+});
+
 test("/status includes channelProvider and cliProvider", async () => {
   const client = createClient();
   const bridge = new BridgeService(

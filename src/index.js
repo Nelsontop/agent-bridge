@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { StateStore } from "./infrastructure/state/state-store.js";
 import { BridgeService } from "./application/bridge-service.js";
+import { buildHealthPayload } from "./application/health-payload.js";
 import { buildMissingConfigGuide, runSetupWizard } from "./application/init-guide.js";
 import { createChannelAdapter } from "./providers/channel/index.js";
 import {
@@ -69,15 +70,7 @@ async function main() {
   if (config.enableHealthServer) {
     const server = http.createServer((req, res) => {
       if (req.method === "GET" && req.url === "/healthz") {
-        const channelMetrics = channelAdapter.getMetrics();
-        sendJson(res, 200, {
-          ok: true,
-          transport: `${config.channelProvider}-ws`,
-          ...bridge.getHealth(),
-          feishu: channelMetrics.feishu || null,
-          reconnect: channelMetrics.reconnect || null,
-          ws: channelMetrics.ws || null
-        });
+        sendJson(res, 200, buildHealthPayload({ bridge, channelAdapter }));
         return;
       }
 
@@ -92,7 +85,7 @@ async function main() {
   await channelAdapter.start();
   await bridge.resumeRecoveredTasks();
   console.log(
-    `[ws] feishu persistent connection started, working in ${config.codexWorkspaceDir}`
+    `[channel] ${config.channelProvider} adapter started, working in ${config.codexWorkspaceDir}`
   );
 }
 

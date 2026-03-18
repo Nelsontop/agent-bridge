@@ -27,6 +27,9 @@ export function assertChannelAdapter(adapter) {
   if (typeof adapter.getMetrics !== "function") {
     throw new Error(methodError(name, "getMetrics"));
   }
+  if (typeof adapter.getTransport !== "function") {
+    throw new Error(methodError(name, "getTransport"));
+  }
 
   return adapter;
 }

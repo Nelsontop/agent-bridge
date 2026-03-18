@@ -46,6 +46,10 @@ export class FeishuChannelAdapter {
       ws: this.wsClient?.getMetrics?.() || null
     };
   }
+
+  getTransport() {
+    return "feishu-ws";
+  }
 }
 
 export function createFeishuChannelAdapter(config, options = {}) {

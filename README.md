@@ -118,6 +118,11 @@ CHANNEL_PROVIDER=feishu
 - `OPENCODE_COMMAND` / `OPENCODE_ADDITIONAL_ARGS`
 - `KIMI_CLI_COMMAND` / `KIMI_CLI_ADDITIONAL_ARGS`
 
+会话续跑说明：
+
+- 仅支持会话续跑的 provider 会复用历史 `session`（当前默认 `codex`）。
+- 不支持续跑的 provider（如 `claude-code` / `opencode` / `kimi-cli`）会按单任务执行，不复用上一轮 `session`，也不会触发上下文压缩。
+
 ### CHANNEL_PROVIDER
 
 支持值：
@@ -135,7 +140,7 @@ curl http://127.0.0.1:${PORT:-3000}/healthz
 重点字段：
 
 - `ok`
-- `transport`
+- `transport`（由 `CHANNEL_PROVIDER` 对应 adapter 上报；当前 `feishu` 为 `feishu-ws`）
 - `channelProvider`
 - `cliProvider`
 - `queuedTasks` / `runningTasks`
