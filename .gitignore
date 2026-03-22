@@ -6,5 +6,8 @@ dist
 .codex
 .learnings
 .tmp-test
+.repo-scan
+.vendor
+.gstack/test-plans
 TODO.md
 todo.md
