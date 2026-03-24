@@ -276,6 +276,13 @@ async function createGitHubRepo(config, workspaceDir, repoName, runCommand) {
   };
 }
 
+async function emitProgress(onProgress, message) {
+  if (!onProgress || !message) {
+    return;
+  }
+  await onProgress(message);
+}
+
 export async function prepareWorkspaceBinding(
   config,
   { repoName, workspaceInput },
@@ -283,19 +290,43 @@ export async function prepareWorkspaceBinding(
 ) {
   const fetchImpl = dependencies.fetchImpl || globalThis.fetch?.bind(globalThis);
   const runCommand = dependencies.runCommand || run;
+  const onProgress = dependencies.onProgress;
   const workspaceDir = new WorkspaceBindingPolicy(config).resolveAuthorizedWorkspace(
     workspaceInput
   );
   const resolvedRepoName = resolveRepoName(workspaceDir, repoName);
 
   ensureWorkspaceDirectory(workspaceDir);
+  await emitProgress(onProgress, `工作目录已确认：${workspaceDir}`);
   let template = { templateApplied: false };
   if (!fetchImpl) {
     throw new Error("当前 Node 环境不支持 fetch，无法在线拉取项目模板。");
   }
   template = await applyTemplateIfNeeded(workspaceDir, fetchImpl);
+  await emitProgress(
+    onProgress,
+    template.templateApplied
+      ? "项目模板：已按 vibe-coding-standard 初始化目录结构"
+      : "项目模板：目录非空，沿用现有内容"
+  );
   const local = await ensureGitRepository(workspaceDir, resolvedRepoName, runCommand);
+  await emitProgress(
+    onProgress,
+    local.gitInitialized ? "本地仓库：已初始化 Git 仓库" : "本地仓库：沿用现有 Git 仓库"
+  );
+  await emitProgress(
+    onProgress,
+    local.initialCommitCreated ? "初始化提交：已创建" : "初始化提交：已存在"
+  );
   const remote = await createGitHubRepo(config, workspaceDir, resolvedRepoName, runCommand);
+  await emitProgress(
+    onProgress,
+    remote.remoteStatus === "created"
+      ? `远端仓库：已创建 ${remote.remoteUrl || "(origin 已配置)"}`
+      : remote.remoteStatus === "existing"
+        ? `远端仓库：沿用现有 origin ${remote.remoteUrl || ""}`.trim()
+        : `远端仓库：创建失败，${remote.remoteError || "请检查 gh 配置后重试"}`
+  );
 
   return {
     ...template,

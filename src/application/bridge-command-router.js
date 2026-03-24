@@ -23,9 +23,15 @@ export class BridgeCommandRouter {
 
     let result;
     try {
+      await this.bridge.safeSend(target, `开始绑定工作目录：${workspaceInput}`);
+      await this.bridge.safeSend(target, "正在校验目录并准备绑定...");
       result = await this.bridge.prepareWorkspaceBinding(this.bridge.config, {
         repoName,
         workspaceInput
+      }, {
+        onProgress: async (message) => {
+          await this.bridge.safeSend(target, message);
+        }
       });
     } catch (error) {
       await this.bridge.safeSend(

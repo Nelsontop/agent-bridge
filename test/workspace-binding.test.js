@@ -187,3 +187,41 @@ test("prepareWorkspaceBinding surfaces template download failures for empty dire
     /模板/
   );
 });
+
+test("prepareWorkspaceBinding reports progress after each completed stage", async () => {
+  const rootDir = makeTempDir("workspace-binding-root-");
+  const workspaceDir = path.join(rootDir, "project-progress");
+  const progress = [];
+
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/contents/vibe-coding-standard?ref=main")) {
+      return createResponse([
+        { name: "AGENTS.md", type: "file", download_url: "https://example.test/AGENTS.md" }
+      ]);
+    }
+    if (url === "https://example.test/AGENTS.md") {
+      return createResponse("# Template\n");
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  await prepareWorkspaceBinding(
+    createConfig(rootDir),
+    { workspaceInput: workspaceDir, repoName: "project-progress" },
+    {
+      fetchImpl,
+      onProgress(message) {
+        progress.push(message);
+      },
+      runCommand: createRunStub()
+    }
+  );
+
+  assert.deepEqual(progress, [
+    `工作目录已确认：${workspaceDir}`,
+    "项目模板：已按 vibe-coding-standard 初始化目录结构",
+    "本地仓库：已初始化 Git 仓库",
+    "初始化提交：已创建",
+    "远端仓库：创建失败，gh CLI 未登录，请先执行 `gh auth login`。"
+  ]);
+});

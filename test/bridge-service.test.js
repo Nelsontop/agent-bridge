@@ -424,6 +424,74 @@ test("bind command supports quoted workspace paths", async () => {
   );
 });
 
+test("bind command sends step-by-step progress messages", async () => {
+  const client = createClient();
+  const store = createStore();
+  const bridge = new BridgeService(
+    createConfig({
+      feishuInteractiveCardsEnabled: false,
+      requireMentionInGroup: false,
+      workspaceAllowedRoots: [TEST_TMP_DIR]
+    }),
+    store,
+    client,
+    {
+      prepareWorkspaceBinding: async (_config, args, dependencies = {}) => {
+        await dependencies.onProgress?.("工作目录已确认：/vol3/1000/workspace/demo");
+        await dependencies.onProgress?.("项目模板：已按 vibe-coding-standard 初始化目录结构");
+        await dependencies.onProgress?.("本地仓库：已初始化 Git 仓库");
+        await dependencies.onProgress?.("初始化提交：已创建");
+        await dependencies.onProgress?.("远端仓库：已创建 https://github.com/demo/project-a");
+
+        return {
+          gitInitialized: true,
+          initialCommitCreated: true,
+          remoteStatus: "created",
+          remoteUrl: "https://github.com/demo/project-a",
+          repoName: "project-a",
+          templateApplied: true,
+          workspaceDir: args.workspaceInput
+        };
+      }
+    }
+  );
+
+  await bridge.handleCommand({
+    commandText: `/bind ${testPath("project-a")} project-a`,
+    chatId: "oc_group_bind_progress",
+    chatKey: "group:oc_group_bind_progress",
+    target: {
+      chatId: "oc_group_bind_progress",
+      replyToMessageId: "om_bind_progress"
+    }
+  });
+
+  assert.deepEqual(client.texts.slice(0, 7).map((entry) => entry.text), [
+    `开始绑定工作目录：${testPath("project-a")}`,
+    "正在校验目录并准备绑定...",
+    "工作目录已确认：/vol3/1000/workspace/demo",
+    "项目模板：已按 vibe-coding-standard 初始化目录结构",
+    "本地仓库：已初始化 Git 仓库",
+    "初始化提交：已创建",
+    "远端仓库：已创建 https://github.com/demo/project-a"
+  ]);
+  assert.equal(
+    client.texts
+      .slice(7)
+      .map((entry) => entry.text)
+      .join("\n"),
+    [
+      `已绑定工作目录：${testPath("project-a")}`,
+      "GitHub 仓库：project-a",
+      "项目模板：已按 vibe-coding-standard 初始化目录结构",
+      "本地仓库：已初始化 Git 仓库",
+      "初始化提交：已创建",
+      "远端仓库：已创建 https://github.com/demo/project-a",
+      "后续在当前群里启动的 Codex session 都会使用这个目录。"
+    ].join("\n")
+  );
+});
+
 test("bind command rejects workspaces outside allowed roots", async () => {
   const client = createClient();
   const bridge = new BridgeService(
