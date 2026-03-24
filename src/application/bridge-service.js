@@ -678,10 +678,67 @@ export class BridgeService {
     return path.join(this.config.contextMemoryDir, memoryFileNameForChat(chatKey));
   }
 
-  readConversationMemory(conversation) {
-    const memoryFilePath = conversation?.memoryFilePath;
-    if (!memoryFilePath || !fs.existsSync(memoryFilePath)) {
+  getLegacyMemoryFilePath(chatKey) {
+    const stateDir = this.config.stateDir || path.join(process.cwd(), ".agent-bridge");
+    return path.join(stateDir, "memory", memoryFileNameForChat(chatKey));
+  }
+
+  migrateMemoryFile(sourcePath, targetPath) {
+    if (!sourcePath || !targetPath || sourcePath === targetPath) {
+      return targetPath || sourcePath || "";
+    }
+
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    try {
+      fs.renameSync(sourcePath, targetPath);
+    } catch (error) {
+      if (error?.code !== "EXDEV") {
+        throw error;
+      }
+      fs.copyFileSync(sourcePath, targetPath);
+      fs.unlinkSync(sourcePath);
+    }
+    return targetPath;
+  }
+
+  resolveConversationMemoryFilePath(chatKey, conversation) {
+    const recordedPath = conversation?.memoryFilePath || "";
+    const preferredPath = this.getMemoryFilePath(chatKey);
+    const legacyPath = this.getLegacyMemoryFilePath(chatKey);
+
+    if (fs.existsSync(preferredPath)) {
+      return preferredPath;
+    }
+    if (recordedPath && fs.existsSync(recordedPath)) {
+      if (recordedPath !== preferredPath) {
+        try {
+          return this.migrateMemoryFile(recordedPath, preferredPath);
+        } catch (error) {
+          console.warn("[memory] failed to migrate memory file:", error.message);
+        }
+      }
+      return recordedPath;
+    }
+    if (legacyPath !== preferredPath && fs.existsSync(legacyPath)) {
+      try {
+        return this.migrateMemoryFile(legacyPath, preferredPath);
+      } catch (error) {
+        console.warn("[memory] failed to migrate legacy memory file:", error.message);
+        return legacyPath;
+      }
+    }
+    return "";
+  }
+
+  readConversationMemory(chatKey, conversation) {
+    const memoryFilePath = this.resolveConversationMemoryFilePath(chatKey, conversation);
+    if (!memoryFilePath) {
       return "";
+    }
+    if (memoryFilePath !== (conversation?.memoryFilePath || "")) {
+      this.store.upsertConversation(chatKey, {
+        memoryFilePath
+      });
     }
 
     try {
@@ -737,7 +794,7 @@ export class BridgeService {
     };
   }
 
-  buildPromptWithMemory(prompt, conversation, workspaceDir) {
+  buildPromptWithMemory(chatKey, prompt, conversation, workspaceDir) {
     if (conversation?.sessionId) {
       return prompt;
     }
@@ -745,7 +802,7 @@ export class BridgeService {
       return prompt;
     }
 
-    const memoryText = this.readConversationMemory(conversation);
+    const memoryText = this.readConversationMemory(chatKey, conversation);
     if (!memoryText) {
       return prompt;
     }

@@ -42,7 +42,12 @@ export async function runTaskExecution(ctx, task) {
       onEvent: (event) => {
         ctx.handleRunnerEvent(task, event);
       },
-      prompt: ctx.buildPromptWithMemory(task.prompt, conversation, task.workspaceDir),
+      prompt: ctx.buildPromptWithMemory(
+        task.chatKey,
+        task.prompt,
+        conversation,
+        task.workspaceDir
+      ),
       sessionId,
       workspaceDir: task.workspaceDir
     }
@@ -85,10 +90,12 @@ export async function runTaskExecution(ctx, task) {
       return;
     }
 
+    const updatedConversation = ctx.store.getConversation(task.chatKey);
     ctx.store.upsertConversation(task.chatKey, {
       lastContextUsageRatio: task.contextUsageRatio,
       lastModelContextWindow: task.modelContextWindow || 0,
-      memoryFilePath: conversation?.memoryFilePath || "",
+      memoryFilePath:
+        updatedConversation?.memoryFilePath || conversation?.memoryFilePath || "",
       lastSenderOpenId: task.senderOpenId,
       lastTaskId: task.id,
       pendingInteraction: null,

@@ -61,6 +61,16 @@ test("loadConfig defaults cliProvider to codex", () => {
   });
 });
 
+test("loadConfig defaults context compaction to local memory at sixty percent", () => {
+  const rootDir = makeRoot("config-context-default-");
+
+  withEnv(baseEnv(rootDir), () => {
+    const config = loadConfig(rootDir);
+    assert.equal(config.contextCompactThreshold, 0.6);
+    assert.equal(config.contextMemoryDir, path.join(rootDir, "memory"));
+  });
+});
+
 test("loadConfig respects CLI_PROVIDER=codex", () => {
   const rootDir = makeRoot("config-cli-codex-");
 

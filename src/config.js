@@ -26,7 +26,7 @@ const DEFAULTS = {
   codexSandbox: "workspace-write",
   codexSkipGitRepoCheck: true,
   contextCompactEnabled: true,
-  contextCompactThreshold: 0.8,
+  contextCompactThreshold: 0.6,
   contextMemoryLoadFraction: 0.1,
   contextWindowFallbackTokens: 128000,
   enableHealthServer: true,
@@ -295,7 +295,7 @@ export function loadConfig(rootDir = process.cwd()) {
     ),
     stateDir,
     stateFile: path.join(stateDir, "state.json"),
-    contextMemoryDir: path.join(stateDir, "memory"),
+    contextMemoryDir: path.join(rootDir, "memory"),
     contextCompactEnabled: asBoolean(
       process.env.CONTEXT_COMPACT_ENABLED,
       DEFAULTS.contextCompactEnabled

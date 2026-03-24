@@ -1811,6 +1811,64 @@ test("loaded memory is trimmed to at most ten percent of the context budget", as
   assert.equal(calls[0].prompt.includes(largeMemory), false);
 });
 
+test("legacy memory under .agent-bridge is migrated to the local memory directory", async () => {
+  const rootDir = makeTempDir("codex-bridge-memory-migrate-");
+  const stateDir = path.join(rootDir, ".agent-bridge");
+  const legacyMemoryDir = path.join(stateDir, "memory");
+  const localMemoryDir = path.join(rootDir, "memory");
+  const legacyMemoryFilePath = path.join(legacyMemoryDir, "cDJwOm9jX3Rlc3RfY2hhdA.md");
+  fs.mkdirSync(legacyMemoryDir, { recursive: true });
+  fs.writeFileSync(legacyMemoryFilePath, "旧目录记忆", "utf8");
+
+  const calls = [];
+  const store = createStore({
+    conversations: {
+      "p2p:oc_test_chat": {
+        lastModelContextWindow: 1000,
+        memoryFilePath: legacyMemoryFilePath,
+        sessionId: "",
+        workspaceDir: testPath("codex-workspace")
+      }
+    }
+  });
+  const bridge = new BridgeService(
+    createConfig({
+      contextCompactEnabled: true,
+      contextCompactThreshold: 0.6,
+      contextMemoryDir: localMemoryDir,
+      stateDir
+    }),
+    store,
+    createClient(),
+    {
+      autoCommitWorkspace: async () => ({ status: "disabled" }),
+      runCodexTask: (_config, args) => {
+        calls.push(args);
+        return {
+          cancel() {},
+          result: Promise.resolve({
+            finalMessage: "done",
+            sessionId: "thread_memory_migrate"
+          })
+        };
+      }
+    }
+  );
+
+  const payload = loadFixture("message.receive_v1.json");
+  await bridge.dispatchEvent(payload);
+  await waitFor(() => bridge.running.size === 0 && calls.length === 1);
+
+  const migratedMemoryFilePath = path.join(localMemoryDir, "cDJwOm9jX3Rlc3RfY2hhdA.md");
+  assert.equal(calls[0].prompt.includes("旧目录记忆"), true);
+  assert.equal(fs.existsSync(migratedMemoryFilePath), true);
+  assert.equal(fs.existsSync(legacyMemoryFilePath), false);
+  assert.equal(
+    store.getConversation("p2p:oc_test_chat")?.memoryFilePath,
+    migratedMemoryFilePath
+  );
+});
+
 test("nested token_count event updates context usage and triggers compaction", async () => {
   const memoryDir = makeTempDir("codex-bridge-memory-nested-");
   const calls = [];
