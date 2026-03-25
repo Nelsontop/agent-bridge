@@ -47,7 +47,7 @@ const DEFAULTS = {
   opencodeCommand: "opencode",
   kimiCliCommand: "kimi",
   maxReplyChars: 1800,
-  port: 3000,
+  port: 3010,
   requireMentionInGroup: true
 };
 

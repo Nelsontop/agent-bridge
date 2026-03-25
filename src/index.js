@@ -33,7 +33,7 @@ async function main() {
     console.log(`[service] installed user service: ${servicePath}`);
     console.log("[service] started with systemctl --user restart agent-bridge.service");
     console.log(
-      `[service] health check: curl http://127.0.0.1:${process.env.PORT || 3000}/healthz`
+      `[service] health check: curl http://127.0.0.1:${process.env.PORT || 3010}/healthz`
     );
     return;
   }

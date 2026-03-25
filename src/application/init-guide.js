@@ -14,7 +14,7 @@ const MANAGED_ENV_SECTIONS = [
   },
   {
     title: "# Server",
-    entries: [["PORT", "3000"]]
+    entries: [["PORT", "3010"]]
   },
   {
     title: "# Codex",
@@ -133,7 +133,7 @@ export function buildSetupChecklist({ envFilePath }) {
     "5. 把应用安装到企业，并确保机器人可以被私聊或被群聊 @。",
     "6. 先执行 `gh auth login`，确保本机已登录 GitHub。",
     "7. 开发调试时运行 `npm start`，长期常驻建议运行 `npm run service:install`。",
-    "8. 用 `curl http://127.0.0.1:3000/healthz` 验证健康检查。"
+    "8. 用 `curl http://127.0.0.1:3010/healthz` 验证健康检查。"
   ].join("\n");
 }
 
@@ -188,7 +188,7 @@ export async function runSetupWizard({
         label: "Allowed Open IDs（逗号分隔）",
         optional: true
       }),
-      PORT: existingEnv.PORT || "3000",
+      PORT: existingEnv.PORT || "3010",
       CODEX_WORKSPACE_DIR: await promptValue(rl, output, {
         defaultValue: existingEnv.CODEX_WORKSPACE_DIR || rootDir,
         label: "Codex 工作目录"

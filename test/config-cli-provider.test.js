@@ -71,6 +71,15 @@ test("loadConfig defaults context compaction to local memory at sixty percent", 
   });
 });
 
+test("loadConfig defaults port to 3010", () => {
+  const rootDir = makeRoot("config-port-default-");
+
+  withEnv(baseEnv(rootDir), () => {
+    const config = loadConfig(rootDir);
+    assert.equal(config.port, 3010);
+  });
+});
+
 test("loadConfig defaults AUTO_COMMIT_MESSAGE_PREFIX to blank", () => {
   const rootDir = makeRoot("config-auto-commit-prefix-default-");
 

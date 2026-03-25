@@ -9,7 +9,7 @@ There is no build step. Use Node 18.18+.
 - `npm install`: install package metadata dependencies if the manifest changes.
 - `npm start`: run the bridge once with `node src/index.js`.
 - `npm run dev`: start the service in watch mode for local iteration.
-- `curl http://127.0.0.1:3000/healthz`: verify the optional health server after startup.
+- `curl http://127.0.0.1:3010/healthz`: verify the optional health server after startup.
 
 Set secrets and runtime options in a local `.env` file as documented in [`README.md`](/vol3/1000/workspace/codex-bridge/README.md).
 

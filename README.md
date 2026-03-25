@@ -43,7 +43,7 @@ npm start
 4. 检查健康状态
 
 ```bash
-curl http://127.0.0.1:3000/healthz
+curl http://127.0.0.1:3010/healthz
 ```
 
 返回 `{"ok":true,...}` 即服务正常。
@@ -68,7 +68,7 @@ FEISHU_APP_SECRET=xxx
 FEISHU_BOT_OPEN_ID=ou_xxx
 
 HOST=127.0.0.1
-PORT=3000
+PORT=3010
 
 CODEX_WORKSPACE_DIR=/home/you/workspace/default-project
 WORKSPACE_ALLOWED_ROOTS=/home/you/workspace
@@ -149,7 +149,7 @@ CHANNEL_PROVIDER=feishu
 访问：
 
 ```bash
-curl http://127.0.0.1:${PORT:-3000}/healthz
+curl http://127.0.0.1:${PORT:-3010}/healthz
 ```
 
 重点字段：

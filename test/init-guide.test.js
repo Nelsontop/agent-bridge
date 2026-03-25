@@ -14,13 +14,13 @@ test("parseEnvText reads quoted and plain env values", () => {
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET="secret value"
 # comment
-PORT=3000
+PORT=3010
 `);
 
   assert.deepEqual(parsed, {
     FEISHU_APP_ID: "cli_xxx",
     FEISHU_APP_SECRET: "secret value",
-    PORT: "3000"
+    PORT: "3010"
   });
 });
 
