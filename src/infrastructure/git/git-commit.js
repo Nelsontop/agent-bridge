@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { buildTaskCommitMessage } from "../../application/task-summary.js";
 
 function run(command, args, cwd) {
   return new Promise((resolve, reject) => {
@@ -32,7 +33,8 @@ function run(command, args, cwd) {
 }
 
 function buildCommitMessage(prefix, task) {
-  return `${prefix} ${task.id}`;
+  const baseMessage = buildTaskCommitMessage(task);
+  return prefix ? `${prefix} ${baseMessage}`.trim() : baseMessage;
 }
 
 function buildExpectedCommitMessage(config, task) {
@@ -85,14 +87,16 @@ export async function autoCommitWorkspace(config, task) {
   }
 
   const head = await run("git", ["rev-parse", "--short", "HEAD"], workspaceDir);
+  const commitMessage = buildExpectedCommitMessage(config, task);
   return {
     status: "committed",
     commitId: head.code === 0 ? head.stdout : "",
+    commitMessage,
     detail: commit.stdout || commit.stderr
   };
 }
 
-export async function rollbackAutoCommitWorkspace(config, task, commitId) {
+export async function rollbackAutoCommitWorkspace(config, task, commitId, commitMessage = "") {
   const workspaceDir = task.workspaceDir;
   if (!config.gitAutoCommitEnabled || !workspaceDir || !commitId) {
     return { status: "skipped", reason: "disabled" };
@@ -123,7 +127,7 @@ export async function rollbackAutoCommitWorkspace(config, task, commitId) {
       detail: subject.stderr || subject.stdout || `git log exited with ${subject.code}`
     };
   }
-  if (subject.stdout !== buildExpectedCommitMessage(config, task)) {
+  if (subject.stdout !== (commitMessage || buildExpectedCommitMessage(config, task))) {
     return { status: "skipped", reason: "message-mismatch" };
   }
 

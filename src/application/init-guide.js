@@ -32,7 +32,7 @@ const MANAGED_ENV_SECTIONS = [
     title: "# Bridge",
     entries: [
       ["AUTO_COMMIT_AFTER_TASK_ENABLED", "false"],
-      ["AUTO_COMMIT_MESSAGE_PREFIX", "bridge: save"]
+      ["AUTO_COMMIT_MESSAGE_PREFIX", ""]
     ]
   }
 ];
@@ -228,7 +228,9 @@ export async function runSetupWizard({
       AUTO_COMMIT_AFTER_TASK_ENABLED:
         existingEnv.AUTO_COMMIT_AFTER_TASK_ENABLED || "false",
       AUTO_COMMIT_MESSAGE_PREFIX:
-        existingEnv.AUTO_COMMIT_MESSAGE_PREFIX || "bridge: save"
+        existingEnv.AUTO_COMMIT_MESSAGE_PREFIX !== undefined
+          ? existingEnv.AUTO_COMMIT_MESSAGE_PREFIX
+          : ""
     };
 
     const finalText = buildEnvFileText(existingText, values);

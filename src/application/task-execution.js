@@ -150,7 +150,8 @@ export async function runTaskExecution(ctx, task) {
       const rollbackResult = await ctx.rollbackAutoCommitWorkspace(
         ctx.config,
         task,
-        autoCommitResult.commitId
+        autoCommitResult.commitId,
+        autoCommitResult.commitMessage
       );
       task.autoCommitSummary = ctx.formatAutoCommitRollbackResult(rollbackResult);
       console.log(

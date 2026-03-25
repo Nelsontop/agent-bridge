@@ -71,6 +71,15 @@ test("loadConfig defaults context compaction to local memory at sixty percent", 
   });
 });
 
+test("loadConfig defaults AUTO_COMMIT_MESSAGE_PREFIX to blank", () => {
+  const rootDir = makeRoot("config-auto-commit-prefix-default-");
+
+  withEnv(baseEnv(rootDir), () => {
+    const config = loadConfig(rootDir);
+    assert.equal(config.gitAutoCommitMessagePrefix, "");
+  });
+});
+
 test("loadConfig respects CLI_PROVIDER=codex", () => {
   const rootDir = makeRoot("config-cli-codex-");
 

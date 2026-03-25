@@ -46,17 +46,27 @@ test("rollbackAutoCommitWorkspace removes the task auto commit and keeps changes
 
   const config = {
     gitAutoCommitEnabled: true,
-    gitAutoCommitMessagePrefix: "bridge: save"
+    gitAutoCommitMessagePrefix: ""
   };
   const task = {
     id: "T001",
+    prompt: "优化 git commit 提交信息规则，不要默认 bridge: save T001 这种格式",
     workspaceDir: repoDir
   };
 
   const commitResult = await autoCommitWorkspace(config, task);
   assert.equal(commitResult.status, "committed");
+  assert.equal(
+    runGit(["log", "-1", "--format=%s"], repoDir),
+    "优化 git commit 提交信息规则"
+  );
 
-  const rollbackResult = await rollbackAutoCommitWorkspace(config, task, commitResult.commitId);
+  const rollbackResult = await rollbackAutoCommitWorkspace(
+    config,
+    task,
+    commitResult.commitId,
+    commitResult.commitMessage
+  );
   assert.equal(rollbackResult.status, "rolled-back");
   assert.equal(runGit(["rev-parse", "--short", "HEAD"], repoDir), initialHead);
   assert.equal(fs.readFileSync(filePath, "utf8"), "base\nchange\n");

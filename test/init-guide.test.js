@@ -45,6 +45,16 @@ test("buildEnvFileText preserves unknown keys and updates managed ones", () => {
   assert.equal(text.includes("CUSTOM_FLAG=1"), true);
 });
 
+test("buildEnvFileText keeps AUTO_COMMIT_MESSAGE_PREFIX blank by default", () => {
+  const text = buildEnvFileText("", {
+    AUTO_COMMIT_AFTER_TASK_ENABLED: "false",
+    AUTO_COMMIT_MESSAGE_PREFIX: ""
+  });
+
+  assert.equal(text.includes("AUTO_COMMIT_MESSAGE_PREFIX="), true);
+  assert.equal(text.includes("AUTO_COMMIT_MESSAGE_PREFIX=bridge: save"), false);
+});
+
 test("setup checklist and missing config guide include actionable next steps", () => {
   const checklist = buildSetupChecklist({ envFilePath: `${TEST_PROJECT_DIR}/.env` });
   const guide = buildMissingConfigGuide({

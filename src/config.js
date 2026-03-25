@@ -17,7 +17,7 @@ const DEFAULT_PRELUDE = [
 
 const DEFAULTS = {
   autoCommitAfterTaskEnabled: false,
-  autoCommitMessagePrefix: "bridge: save",
+  autoCommitMessagePrefix: "",
   channelProvider: "feishu",
   claudeCodeCommand: "claude",
   cliProvider: "codex",
@@ -419,6 +419,8 @@ export function loadConfig(rootDir = process.cwd()) {
     ),
     gitAutoCommitEnabled,
     gitAutoCommitMessagePrefix:
-      process.env.AUTO_COMMIT_MESSAGE_PREFIX || DEFAULTS.autoCommitMessagePrefix
+      process.env.AUTO_COMMIT_MESSAGE_PREFIX !== undefined
+        ? process.env.AUTO_COMMIT_MESSAGE_PREFIX
+        : DEFAULTS.autoCommitMessagePrefix
   };
 }
